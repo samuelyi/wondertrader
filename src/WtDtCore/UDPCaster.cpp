@@ -11,10 +11,10 @@
 #include "DataManager.h"
 
 #include "../Share/StrUtil.hpp"
-#include "../Share/WTSDataDef.hpp"
-#include "../Share/WTSCollection.hpp"
-#include "../Share/WTSContractInfo.hpp"
-#include "../Share/WTSVariant.hpp"
+#include "../Includes/WTSDataDef.hpp"
+#include "../Includes/WTSCollection.hpp"
+#include "../Includes/WTSContractInfo.hpp"
+#include "../Includes/WTSVariant.hpp"
 
 #include "../WTSTools/WTSBaseDataMgr.h"
 #include "../WTSTools/WTSLogger.h"
@@ -279,6 +279,7 @@ void UDPCaster::broadcast(WTSObject* data, uint32_t dataType)
 		return;
 
 	{
+		BoostUniqueLock lock(m_mtxCast);
 		m_dataQue.push(CastData(data, dataType));
 	}
 
@@ -295,9 +296,15 @@ void UDPCaster::broadcast(WTSObject* data, uint32_t dataType)
 					continue;
 				}	
 
-				do 
+				std::queue<CastData> tmpQue;
 				{
-					const CastData& castData = m_dataQue.front();
+					BoostUniqueLock lock(m_mtxCast);
+					tmpQue.swap(m_dataQue);
+				}
+				
+				while(!tmpQue.empty())
+				{
+					const CastData& castData = tmpQue.front();
 
 					if (castData._data == NULL)
 						break;
@@ -357,12 +364,9 @@ void UDPCaster::broadcast(WTSObject* data, uint32_t dataType)
 							it->first->send_to(boost::asio::buffer(buf_raw), item.second->_ep);
 						}
 					}
-				} while (false);
-				
-				{
-					BoostUniqueLock lock(m_mtxCast);
-					m_dataQue.pop();
-				}
+
+					tmpQue.pop();
+				} 
 			}
 		}));
 	}

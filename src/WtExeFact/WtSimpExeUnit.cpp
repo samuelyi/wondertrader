@@ -8,8 +8,9 @@
  */
 #include "WtSimpExeUnit.h"
 
-#include "../Share/WTSVariant.hpp"
-#include "../Share/WTSContractInfo.hpp"
+#include "../Includes/WTSVariant.hpp"
+#include "../Includes/WTSContractInfo.hpp"
+#include "../Includes/WTSSessionInfo.hpp"
 #include "../Share/decimal.h"
 
 extern const char* FACT_NAME;
@@ -18,7 +19,7 @@ extern const char* FACT_NAME;
 WtSimpExeUnit::WtSimpExeUnit()
 	: _last_tick(NULL)
 	, _comm_info(NULL)
-	, _use_opposite(false)
+	, _price_mode(0)
 	, _price_offset(0)
 	, _expire_secs(0)
 	, _cancel_cnt(0)
@@ -46,6 +47,12 @@ const char* WtSimpExeUnit::getName()
 	return "WtSimpExeUnit";
 }
 
+const char* PriceModeNames[] = 
+{
+	"最优价",
+	"最新价",
+	"对手价"
+};
 void WtSimpExeUnit::init(ExecuteContext* ctx, const char* stdCode, WTSVariant* cfg)
 {
 	ExecuteUnit::init(ctx, stdCode, cfg);
@@ -54,11 +61,15 @@ void WtSimpExeUnit::init(ExecuteContext* ctx, const char* stdCode, WTSVariant* c
 	if (_comm_info)
 		_comm_info->retain();
 
+	_sess_info = ctx->getSessionInfo(stdCode);
+	if (_sess_info)
+		_sess_info->retain();
+
 	_price_offset = cfg->getInt32("offset");
 	_expire_secs = cfg->getUInt32("expire");
-	_use_opposite = cfg->getBoolean("opposite");
+	_price_mode = cfg->getBoolean("pricemode");	//价格类型，0-最新价，-1-最优价，1-对手价，默认为0
 
-	ctx->writeLog("执行单元 %s 初始化完成，委托价 %s ± %d 跳，订单超时 %u 秒", stdCode, _use_opposite?"对手价":"最新价", _price_offset, _expire_secs);
+	ctx->writeLog("执行单元 %s 初始化完成，委托价 %s ± %d 跳，订单超时 %u 秒", stdCode, PriceModeNames[_price_mode+1], _price_offset, _expire_secs);
 }
 
 void WtSimpExeUnit::on_order(uint32_t localid, const char* stdCode, bool isBuy, double leftover, double price, bool isCanceled)
@@ -93,7 +104,7 @@ void WtSimpExeUnit::on_channel_ready()
 	if(!decimal::eq(undone, 0) && _orders.empty())
 	{
 		//这说明有未完成单不在监控之中，先撤掉
-		_ctx->writeLog("%s有不在管理中的未完成单 %d 手，全部撤销", _code.c_str(), undone);
+		_ctx->writeLog("%s有不在管理中的未完成单 %f ，全部撤销", _code.c_str(), undone);
 
 		bool isBuy = (undone > 0);
 		OrderIDs ids = _ctx->cancel(_code.c_str(), isBuy);
@@ -123,9 +134,17 @@ void WtSimpExeUnit::on_tick(WTSTickData* newTick)
 	bool isFirstTick = false;
 	//如果原来的tick不为空，则要释放掉
 	if (_last_tick)
+	{
 		_last_tick->release();
+	}
 	else
+	{
+		//如果行情时间不在交易时间，这种情况一般是集合竞价的行情进来，下单会失败，所以直接过滤掉这笔行情
+		if (_sess_info != NULL && !_sess_info->isInTradingTime(newTick->actiontime() / 100000))
+			return;
+
 		isFirstTick = true;
+	}
 
 	//新的tick数据，要保留
 	_last_tick = newTick;
@@ -170,11 +189,9 @@ void WtSimpExeUnit::on_tick(WTSTickData* newTick)
 	}
 }
 
-void WtSimpExeUnit::on_trade(const char* stdCode, bool isBuy, double vol, double price)
+void WtSimpExeUnit::on_trade(uint32_t localid, const char* stdCode, bool isBuy, double vol, double price)
 {
 	//不用触发，这里在ontick里触发吧
-	//_ctx->writeLog("%s合约%s%u手，重新触发执行逻辑", stdCode, isBuy?"买入":"卖出", vol);
-	//doCalculate();
 }
 
 void WtSimpExeUnit::on_entrust(uint32_t localid, const char* stdCode, bool bSuccess, const char* message)
@@ -222,7 +239,7 @@ void WtSimpExeUnit::doCalculate()
 	else if (decimal::eq(newVol,0) && !decimal::eq(undone, 0))
 	{
 		//如果目标仓位为0，且未完成不为0
-		//那么当目前仓位为0，或者 目前仓位和未完成手数方向相同
+		//那么当目前仓位为0，或者 目前仓位和未完成数量方向相同
 		//这样也要全部撤销
 		//if (realPos == 0 || (realPos * undone > 0))
 		if (decimal::eq(realPos, 0) || decimal::gt(realPos * undone, 0))
@@ -258,13 +275,22 @@ void WtSimpExeUnit::doCalculate()
 		return;
 	}
 
-	/*
-	*	这是一个简单的执行模块
-	*	一般合约就用涨跌停价发出
-	*/
-
-	double buyPx = _last_tick->price() + _comm_info->getPriceTick() * _price_offset;
-	double sellPx = _last_tick->price() - _comm_info->getPriceTick() * _price_offset;
+	double buyPx, sellPx;
+	if(_price_mode == -1)
+	{
+		buyPx = _last_tick->bidprice(0) + _comm_info->getPriceTick() * _price_offset;
+		sellPx = _last_tick->askprice(0) - _comm_info->getPriceTick() * _price_offset;
+	}
+	else if(_price_mode == 0)
+	{
+		buyPx = _last_tick->price() + _comm_info->getPriceTick() * _price_offset;
+		sellPx = _last_tick->price() - _comm_info->getPriceTick() * _price_offset;
+	}
+	else //if (_price_mode == 1)
+	{
+		buyPx = _last_tick->askprice(0) + _comm_info->getPriceTick() * _price_offset;
+		sellPx = _last_tick->bidprice(0) - _comm_info->getPriceTick() * _price_offset;
+	}
 
 	//if (newVol > curPos)
 	if (decimal::gt(newVol, curPos))

@@ -8,7 +8,7 @@
  * \brief 
  */
 #pragma once
-#include "ICtaStraCtx.h"
+#include "../Includes/ICtaStraCtx.h"
 #include "WtExecuter.h"
 #include "WtEngine.h"
 
@@ -18,15 +18,7 @@ typedef boost::shared_ptr<ICtaStraCtx> CtaContextPtr;
 
 class WtCtaRtTicker;
 
-class ICtaEventListener
-{
-public:
-	virtual void on_initialize_event() {}
-	virtual void on_schedule_event(uint32_t uDate, uint32_t uTime) {}
-	virtual void on_session_event(uint32_t uDate, bool isBegin = true) {}
-};
-
-class WtCtaEngine : public WtEngine
+class WtCtaEngine : public WtEngine, public IExecuterStub
 {
 public:
 	WtCtaEngine();
@@ -52,6 +44,15 @@ public:
 	virtual bool isInTrading() override;
 	virtual uint32_t transTimeToMin(uint32_t uTime) override;
 
+	///////////////////////////////////////////////////////////////////////////
+	//IExecuterStub ½Ó¿Ú
+	virtual uint64_t get_real_time() override;
+	virtual WTSCommodityInfo* get_comm_info(const char* stdCode) override;
+	virtual WTSSessionInfo* get_sess_info(const char* stdCode) override;
+	virtual IHotMgr* get_hot_mon() { return _hot_mgr; }
+	virtual uint32_t get_trading_day() { return _cur_tdate; }
+
+
 public:
 	void on_schedule(uint32_t curDate, uint32_t curTime);	
 
@@ -61,15 +62,10 @@ public:
 	
 	CtaContextPtr	getContext(uint32_t id);
 
-	inline void addExecuter(WtExecuterPtr& executer)
+	inline void addExecuter(ExecCmdPtr executer)
 	{
-		_executers.push_back(executer);
-		executer->setEngine(this);
-	}
-
-	inline void regEventListener(ICtaEventListener* listener)
-	{
-		_evt_listener = listener;
+		_exec_mgr.add_executer(executer);
+		executer->setStub(this);
 	}
 
 private:
@@ -77,10 +73,8 @@ private:
 	ContextMap		_ctx_map;
 
 	WtCtaRtTicker*	_tm_ticker;
-	ICtaEventListener*	_evt_listener;
 
-	typedef std::vector<WtExecuterPtr> ExecuterList;
-	ExecuterList	_executers;
+	WtExecuterMgr	_exec_mgr;
 
 	WTSVariant*		_cfg;
 };

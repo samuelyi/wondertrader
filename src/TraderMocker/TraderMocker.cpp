@@ -1,14 +1,16 @@
 #include "TraderMocker.h"
 
-#include "../Share/WTSParams.hpp"
-#include "../Share/WTSDataDef.hpp"
-#include "../Share/WTSTradeDef.hpp"
-#include "../Share/WTSContractInfo.hpp"
-#include "../Share/IBaseDataMgr.h"
+#include "../Includes/WTSParams.hpp"
+#include "../Includes/WTSDataDef.hpp"
+#include "../Includes/WTSTradeDef.hpp"
+#include "../Includes/WTSContractInfo.hpp"
+#include "../Includes/IBaseDataMgr.h"
+#include "../Includes/WTSError.hpp"
+
 #include "../Share/TimeUtils.hpp"
 #include "../Share/BoostFile.hpp"
 #include "../Share/decimal.h"
-#include "../Share/WTSError.hpp"
+#include "../Share/StrUtil.hpp"
 
 #include <rapidjson/document.h>
 #include <rapidjson/prettywriter.h>
@@ -159,7 +161,7 @@ int TraderMocker::orderInsert(WTSEntrust* entrust)
 				break;
 			}
 
-			//检查手数的合法性
+			//检查数量的合法性
 			if ((commInfo->getCategoty() == CC_Stock) && (entrust->getOffsetType() == WOT_OPEN) && !decimal::eq(decimal::mod(entrust->getVolumn(), 100), 0))
 			{
 				bPass = false;

@@ -12,7 +12,7 @@
 #include "UDPCaster.h"
 #include "WtHelper.h"
 
-#include "../Share/WTSVariant.hpp"
+#include "../Includes/WTSVariant.hpp"
 #include "../Share/DLLHelper.hpp"
 
 #include "../WTSTools/WTSBaseDataMgr.h"
@@ -192,7 +192,7 @@ void DataManager::outputWriterLog(WTSLogLevel ll, const char* format, ...)
 {
 	va_list args;
 	va_start(args, format);
-	WTSLogger::log_direct(ll, format, args);
+	WTSLogger::vlog(ll, format, args);
 	va_end(args);
 }
 

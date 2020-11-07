@@ -10,11 +10,11 @@
 #pragma once
 #include <string>
 #include <unordered_map>
-
 #include "DataDefine.h"
+#include "../WtDataWriter/MysqlDB.hpp"
 
-#include "../Share/WTSMarcos.h"
-#include "../Share/WTSTypes.h"
+#include "../Includes/WTSMarcos.h"
+#include "../Includes/WTSTypes.h"
 
 #include "../WTSTools/WTSHotMgr.h"
 #include "../WTSTools/WTSBaseDataMgr.h"
@@ -29,6 +29,8 @@ class WTSSessionInfo;
 class WTSCommodityInfo;
 NS_OTP_END
 
+typedef std::shared_ptr<MysqlDb>	MysqlDbPtr;
+
 USING_NS_OTP;
 
 class IDataSink
@@ -41,6 +43,7 @@ public:
 	virtual void	handle_init() = 0;
 	virtual void	handle_session_begin() = 0;
 	virtual void	handle_session_end() = 0;
+	virtual void	handle_replay_done() {}
 };
 
 class HisDataReplayer
@@ -77,6 +80,34 @@ private:
 
 	typedef std::unordered_map<std::string, BarsList>	BarsCache;
 
+	typedef enum tagTaskPeriodType
+	{
+		TPT_None,		//不重复
+		TPT_Minute = 4,	//分钟线周期
+		TPT_Daily = 8,	//每个交易日
+		TPT_Weekly,		//每周，遇到节假日的话要顺延
+		TPT_Monthly,	//每月，遇到节假日顺延
+		TPT_Yearly		//每年，遇到节假日顺延
+	}TaskPeriodType;
+
+	typedef struct _TaskInfo
+	{
+		uint32_t	_id;
+		char		_name[16];		//任务名
+		char		_trdtpl[16];	//交易日模板
+		char		_session[16];	//交易时间模板
+		uint32_t	_day;			//日期，根据周期变化，每日为0，每周为0~6，对应周日到周六，每月为1~31，每年为0101~1231
+		uint32_t	_time;			//时间，精确到分钟
+		bool		_strict_time;	//是否是严格时间，严格时间即只有时间相等才会执行，不是严格时间，则大于等于触发时间都会执行
+
+		uint64_t	_last_exe_time;	//上次执行时间，主要为了防止重复执行
+
+		TaskPeriodType	_period;	//任务周期
+	} TaskInfo;
+
+	typedef std::shared_ptr<TaskInfo> TaskInfoPtr;
+
+
 
 public:
 	HisDataReplayer();
@@ -86,11 +117,13 @@ private:
 	/*
 	*	将历史数据放入缓存
 	*/
-	bool		cacheRawBars(const std::string& key, const char* stdCode, WTSKlinePeriod period);
+	bool		cacheRawBarsFromBin(const std::string& key, const char* stdCode, WTSKlinePeriod period);
 
 	bool		cacheRawBarsFromCSV(const std::string& key, const char* stdCode, WTSKlinePeriod period);
 
-	bool		cacheRawTicks(const std::string& key, const char* stdCode, uint32_t uDate);
+	bool		cacheRawBarsFromDB(const std::string& key, const char* stdCode, WTSKlinePeriod period);
+
+	bool		cacheRawTicksFromBin(const std::string& key, const char* stdCode, uint32_t uDate);
 
 	bool		cacheRawTicksFromCSV(const std::string& key, const char* stdCode, uint32_t uDate);
 
@@ -102,6 +135,12 @@ private:
 
 	bool		checkTicks(const char* stdCode, uint32_t uDate);
 
+	bool		loadStkAdjFactors(const char* adjfile);
+
+	bool		loadStkAdjFactorsFromDB();
+
+	void		init_db();
+
 public:
 	bool init(WTSVariant* cfg);
 
@@ -109,9 +148,9 @@ public:
 
 	void register_sink(IDataSink* listener){ _listener = listener; }
 
-	WTSKlineSlice* get_kline_slice(const char* stdCode, const char* period, uint32_t count, uint32_t times = 1, bool isMain = false);
+	void register_task(uint32_t taskid, uint32_t date, uint32_t time, const char* period, const char* trdtpl = "CHINA", const char* session = "TRADING");
 
-	//WTSHisTickData* get_ticks(const char* stdCode, uint32_t count, uint64_t etime);
+	WTSKlineSlice* get_kline_slice(const char* stdCode, const char* period, uint32_t count, uint32_t times = 1, bool isMain = false);
 
 	WTSTickSlice* get_tick_slice(const char* stdCode, uint32_t count, uint64_t etime = 0);
 
@@ -136,6 +175,8 @@ private:
 
 	TickCache		_ticks_cache;
 	BarsCache		_bars_cache;
+
+	TaskInfoPtr		_task;
 
 	std::string		_main_key;
 	bool			_tick_enabled;
@@ -186,5 +227,37 @@ private:
 	StraSubMap		_tick_sub_map;	//tick数据订阅表
 
 	std::unordered_set<std::string>		_subed_raw_codes;	//tick订阅表（真实代码模式）
+
+	//除权因子
+	typedef struct _AdjFactor
+	{
+		uint32_t	_date;
+		double		_factor;
+	} AdjFactor;
+	typedef std::vector<AdjFactor> AdjFactorList;
+	typedef std::unordered_map<std::string, AdjFactorList>	AdjFactorMap;
+	AdjFactorMap	_adj_factors;
+
+	inline const AdjFactorList& getAdjFactors(const char* code, const char* exchg)
+	{
+		char key[20] = { 0 };
+		sprintf(key, "%s.%s", exchg, code);
+		return _adj_factors[key];
+	}
+
+	typedef struct _DBConfig
+	{
+		bool	_active;
+		char	_host[64];
+		int32_t	_port;
+		char	_dbname[32];
+		char	_user[32];
+		char	_pass[32];
+
+		_DBConfig() { memset(this, 0, sizeof(_DBConfig)); }
+	} DBConfig;
+
+	DBConfig	_db_conf;
+	MysqlDbPtr	_db_conn;
 };
 

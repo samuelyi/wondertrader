@@ -11,7 +11,7 @@
 #include "HisDataReplayer.h"
 #include "WtHelper.h"
 
-#include "../Share/WTSVariant.hpp"
+#include "../Includes/WTSVariant.hpp"
 #include "../Share/TimeUtils.hpp"
 #include "../Share/decimal.h"
 #include "../Share/BoostFile.hpp"
@@ -85,6 +85,11 @@ WTSCommodityInfo* ExecMocker::getCommodityInfo(const char* stdCode)
 	return _replayer->get_commodity_info(stdCode);
 }
 
+WTSSessionInfo* ExecMocker::getSessionInfo(const char* stdCode)
+{
+	return _replayer->get_session_info(stdCode, true);
+}
+
 uint64_t ExecMocker::getCurTime()
 {
 	return TimeUtils::makeTime(_replayer->get_date(), _replayer->get_raw_time() * 100000 + _replayer->get_secs());
@@ -105,7 +110,7 @@ void ExecMocker::handle_session_end()
 	_orders.clear();
 	_undone = 0;
 
-	WTSLogger::info("总下单笔数%u, 总下单手数%u, 总撤单笔数%u, 总撤单手数%u, 总信号数%u", _ord_cnt, _ord_qty, _cacl_cnt, _cacl_qty, _sig_cnt);
+	WTSLogger::info("总下单笔数%u, 总下单数量%u, 总撤单笔数%u, 总撤单数量%u, 总信号数%u", _ord_cnt, _ord_qty, _cacl_cnt, _cacl_qty, _sig_cnt);
 }
 
 void ExecMocker::update_lob(WTSTickData* curTick)
@@ -183,7 +188,7 @@ void ExecMocker::match_orders(WTSTickData* curTick, OrderIDs& to_erase)
 
 			to_erase.push_back(localid);
 
-			WTSLogger::info("订单%u已撤销, 剩余手数: %d", localid, ordInfo._left*(ordInfo._buy ? 1 : -1));
+			WTSLogger::info("订单%u已撤销, 剩余数量: %d", localid, ordInfo._left*(ordInfo._buy ? 1 : -1));
 			ordInfo._left = 0;
 			continue;
 		}
@@ -237,7 +242,7 @@ void ExecMocker::match_orders(WTSTickData* curTick, OrderIDs& to_erase)
 				}
 
 				double qty = min(volumn, ordInfo._left);
-				_exec_unit->on_trade(ordInfo._code, ordInfo._buy, qty, price);
+				_exec_unit->on_trade(localid, ordInfo._code, ordInfo._buy, qty, price);
 				_trade_logs << localid << ","
 					<< _sig_time << ","
 					<< ordInfo._time << ","
@@ -255,7 +260,7 @@ void ExecMocker::match_orders(WTSTickData* curTick, OrderIDs& to_erase)
 				ordInfo._traded += qty;
 				ordInfo._left -= qty;
 				_undone -= qty;
-				WTSLogger::info("%d未完成订单手数更新,%d", __LINE__, _undone);
+				WTSLogger::info("%d未完成订单数量更新,%d", __LINE__, _undone);
 				WTSLogger::info("持仓更新,%d", _position);
 
 				_exec_unit->on_order(localid, ordInfo._code, ordInfo._buy, ordInfo._left, price, false);
@@ -311,7 +316,7 @@ void ExecMocker::match_orders(WTSTickData* curTick, OrderIDs& to_erase)
 				}
 
 				double qty = min(volumn, ordInfo._left);
-				_exec_unit->on_trade(ordInfo._code, ordInfo._buy, qty, price);
+				_exec_unit->on_trade(localid, ordInfo._code, ordInfo._buy, qty, price);
 				_trade_logs << localid << ","
 					<< _sig_time << ","
 					<< ordInfo._time << ","
@@ -329,7 +334,7 @@ void ExecMocker::match_orders(WTSTickData* curTick, OrderIDs& to_erase)
 				ordInfo._traded += qty;
 				ordInfo._left -= qty;
 				_undone += qty;
-				WTSLogger::info("%d未完成订单手数更新,%d", __LINE__, _undone);
+				WTSLogger::info("%d未完成订单数量更新,%d", __LINE__, _undone);
 				WTSLogger::info("持仓更新,%d", _position);
 
 				_exec_unit->on_order(localid, ordInfo._code, ordInfo._buy, ordInfo._left, price, false);
@@ -468,7 +473,7 @@ OrderIDs ExecMocker::buy(const char* stdCode, double price, double qty)
 	ordInfo._time = (uint64_t)_replayer->get_date() * 1000000000 + (uint64_t)_replayer->get_raw_time() * 100000 + _replayer->get_secs();
 
 	_undone += (int32_t)qty;
-	WTSLogger::info("%d未完成订单手数更新,%d", __LINE__, _undone);
+	WTSLogger::info("%d未完成订单数量更新,%d", __LINE__, _undone);
 
 	OrderIDs ret;
 	ret.push_back(localid);
@@ -503,7 +508,7 @@ OrderIDs ExecMocker::sell(const char* stdCode, double price, double qty)
 	ordInfo._time = (uint64_t)_replayer->get_date() * 1000000000 + (uint64_t)_replayer->get_raw_time() * 100000 + _replayer->get_secs();
 
 	_undone -= (int32_t)qty;
-	WTSLogger::info("%d未完成订单手数更新,%d", __LINE__, _undone);
+	WTSLogger::info("%d未完成订单数量更新,%d", __LINE__, _undone);
 
 	OrderIDs ret;
 	ret.push_back(localid);
@@ -521,7 +526,7 @@ bool ExecMocker::cancel(uint32_t localid)
 	_undone -= ordInfo._left*(ordInfo._buy ? 1 : -1);
 	_cacl_cnt++;
 	_cacl_qty += ordInfo._left;
-	WTSLogger::info("%d未完成订单手数更新,%d", __LINE__, _undone);
+	WTSLogger::info("%d未完成订单数量更新,%d", __LINE__, _undone);
 
 	return true;
 }
@@ -555,7 +560,7 @@ OrderIDs ExecMocker::cancel(const char* stdCode, bool isBuy, double qty /*= 0*/)
 			}
 		}
 	}
-	WTSLogger::info("%d未完成订单手数更新,%d", __LINE__, _undone);
+	WTSLogger::info("%d未完成订单数量更新,%d", __LINE__, _undone);
 
 	return ret;
 }
@@ -564,7 +569,7 @@ void ExecMocker::writeLog(const char* fmt, ...)
 {
 	va_list args;
 	va_start(args, fmt);
-	WTSLogger::log_dyn_direct("executer", _id.c_str(), LL_INFO, fmt, args);
+	WTSLogger::vlog_dyn("executer", _id.c_str(), LL_INFO, fmt, args);
 	va_end(args);
 
 

@@ -8,11 +8,11 @@ SET(CMAKE_CXX_STANDARD 11)
 
 IF (WIN32)
 	IF("${CMAKE_GENERATOR}" MATCHES "(Win64|IA64)")
-		SET(INCS $ENV{MyX64Deps12}/include)
-		SET(LNKS $ENV{MyX64Deps12}/lib)
+		SET(INCS $ENV{MyDepends141}/include)
+		SET(LNKS $ENV{MyDepends141}/lib/x64)
 	ELSE()
-		SET(INCS $ENV{MyDepends12}/include)
-		SET(LNKS $ENV{MyDepends12}/lib)
+		SET(INCS $ENV{MyDepends141}/include)
+		SET(LNKS $ENV{MyDepends141}/lib/x86)
 	ENDIF()
 ELSE (UNIX)
 	SET (MyDeps "/home/mydeps")
@@ -43,5 +43,28 @@ SET(LIBS
 #9. 生成可执行文件
 ADD_EXECUTABLE(QuoteFactory ${SRCS})
 TARGET_LINK_LIBRARIES(QuoteFactory ${LIBS})
+
+file(MAKE_DIRECTORY ${EXECUTABLE_OUTPUT_PATH}/parsers/)
+
+add_custom_command(TARGET QuoteFactory POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E
+		copy ${PROJECT_SOURCE_DIR}/../build/bin/libParserCTP.so ${EXECUTABLE_OUTPUT_PATH}/parsers/
+		
+		COMMAND ${CMAKE_COMMAND} -E
+		copy ${PROJECT_SOURCE_DIR}/../build/bin/libParserXTP.so ${EXECUTABLE_OUTPUT_PATH}/parsers/
+		
+		COMMAND ${CMAKE_COMMAND} -E
+		copy ${PROJECT_SOURCE_DIR}/../build/bin/libParseriTap.so ${EXECUTABLE_OUTPUT_PATH}/parsers/
+		
+		COMMAND ${CMAKE_COMMAND} -E
+		copy ${PROJECT_SOURCE_DIR}/../build/bin/libParserFemas.so ${EXECUTABLE_OUTPUT_PATH}/parsers/
+		
+		COMMAND ${CMAKE_COMMAND} -E
+		copy ${PROJECT_SOURCE_DIR}/../build/bin/libParserCTPMini.so ${EXECUTABLE_OUTPUT_PATH}/parsers/
+		
+		COMMAND ${CMAKE_COMMAND} -E
+		copy ${PROJECT_SOURCE_DIR}/../build/bin/libWtDataWriter.so ${EXECUTABLE_OUTPUT_PATH}/
+		
+		COMMENT "depends modules copied")
 
 

@@ -10,8 +10,6 @@
 #include "WtDtPorter.h"
 #include "WtDtRunner.h"
 
-#include "../Common/version.h"
-
 #include "../WTSTools/WTSLogger.h"
 #include "../Share/StrUtil.hpp"
 
@@ -125,7 +123,11 @@ const char* get_version()
 	{
 		_ver = PLATFORM_NAME;
 		_ver += " ";
-		_ver += GetVersionStr();
+		_ver += WT_VERSION;
+		_ver += " Build@";
+		_ver += __DATE__;
+		_ver += " ";
+		_ver += __TIME__;
 	}
 	return _ver.c_str();
 }
@@ -134,10 +136,10 @@ void write_log(unsigned int level, const char* message, const char* catName)
 {
 	if (strlen(catName) > 0)
 	{
-		WTSLogger::log2(catName, (WTSLogLevel)level, message);
+		WTSLogger::log2_raw(catName, (WTSLogLevel)level, message);
 	}
 	else
 	{
-		WTSLogger::log((WTSLogLevel)level, message);
+		WTSLogger::log_raw((WTSLogLevel)level, message);
 	}
 }

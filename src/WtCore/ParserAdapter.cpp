@@ -15,11 +15,11 @@
 #include "../Share/DLLHelper.hpp"
 #include "../Share/CodeHelper.hpp"
 #include "../Share/TimeUtils.hpp"
-#include "../Share/WTSContractInfo.hpp"
-#include "../Share/WTSDataDef.hpp"
-#include "../Share/WTSVariant.hpp"
-#include "../Share/IBaseDataMgr.h"
-#include "../Share/IHotMgr.h"
+#include "../Includes/WTSContractInfo.hpp"
+#include "../Includes/WTSDataDef.hpp"
+#include "../Includes/WTSVariant.hpp"
+#include "../Includes/IBaseDataMgr.h"
+#include "../Includes/IHotMgr.h"
 #include "../Share/StdUtils.hpp"
 
 #include "../WTSTools/WTSLogger.h"
@@ -33,7 +33,7 @@ ParserAdapter::ParserAdapter()
 	, _remover(NULL)
 	, _stopped(false)
 	, _bd_mgr(NULL)
-	, _engine(NULL)
+	, _stub(NULL)
 	, _cfg(NULL)
 {
 }
@@ -43,13 +43,14 @@ ParserAdapter::~ParserAdapter()
 {
 }
 
-bool ParserAdapter::init(const char* id, WTSVariant* cfg, WtEngine* engine)
+bool ParserAdapter::init(const char* id, WTSVariant* cfg, IParserStub* stub, IBaseDataMgr* bgMgr, IHotMgr* hotMgr/* = NULL*/)
 {
 	if (cfg == NULL)
 		return false;
 
-	_engine = engine;
-	_bd_mgr = _engine->get_basedata_mgr();;
+	_stub = stub;
+	_bd_mgr = bgMgr;
+	_hot_mgr = hotMgr;
 	_id = id;
 
 	if (_cfg != NULL)
@@ -107,6 +108,17 @@ bool ParserAdapter::init(const char* id, WTSVariant* cfg, WtEngine* engine)
 		}
 	}
 
+	std::string strCodes = cfg->getString("code");
+	if (!strCodes.empty())
+	{
+		const StringVector &ayCodes = StrUtil::split(strCodes, ",");
+		auto it = ayCodes.begin();
+		for (; it != ayCodes.end(); it++)
+		{
+			_code_filter.insert(*it);
+		}
+	}
+
 	if (_parser_api)
 	{
 		_parser_api->registerListener(this);
@@ -115,7 +127,30 @@ bool ParserAdapter::init(const char* id, WTSVariant* cfg, WtEngine* engine)
 		if (_parser_api->init(params))
 		{
 			ContractSet contractSet;
-			if (!_exchg_filter.empty())
+			if (!_code_filter.empty())//优先判断合约过滤器
+			{
+				ExchgFilter::iterator it = _code_filter.begin();
+				for (; it != _code_filter.end(); it++)
+				{
+					//全代码，形式如SSE.600000，期货代码为CFFEX.IF2005
+					std::string code, exchg;
+					auto ay = StrUtil::split((*it).c_str(), ".");
+					if (ay.size() == 1)
+						code = ay[0];
+					else
+					{
+						exchg = ay[0];
+						code = ay[1];
+					}
+					WTSContractInfo* contract = _bd_mgr->getContract(code.c_str(), exchg.c_str());
+					WTSCommodityInfo* pCommInfo = _bd_mgr->getCommodity(contract);
+					if (pCommInfo->getCategoty() == CC_Future || pCommInfo->getCategoty() == CC_Option || pCommInfo->getCategoty() == CC_Stock)
+					{
+						contractSet.insert(contract->getFullCode());
+					}
+				}
+			}
+			else if (!_exchg_filter.empty())
 			{
 				ExchgFilter::iterator it = _exchg_filter.begin();
 				for (; it != _exchg_filter.end(); it++)
@@ -186,11 +221,6 @@ bool ParserAdapter::run()
 	return true;
 }
 
-void ParserAdapter::handleSymbolList(const WTSArray* aySymbols)
-{
-
-}
-
 void ParserAdapter::handleQuote(WTSTickData *quote, bool bNeedSlice)
 {
 	if (_stopped)
@@ -202,18 +232,28 @@ void ParserAdapter::handleQuote(WTSTickData *quote, bool bNeedSlice)
 	if (quote->actiondate() == 0 || quote->tradingdate() == 0)
 		return;
 
-	std::string hotCode = _engine->get_hot_mgr()->getHotCode(quote->exchg(), quote->code(), quote->tradingdate());
+	bool isHot = false;
 
 	WTSContractInfo* cInfo = _bd_mgr->getContract(quote->code(), quote->exchg());
 	WTSCommodityInfo* commInfo = _bd_mgr->getCommodity(cInfo);
 	std::string stdCode;
 	if (commInfo->getCategoty() == CC_Future)
+	{
 		stdCode = CodeHelper::bscFutCodeToStdCode(cInfo->getCode(), cInfo->getExchg());
-	else
+		std::string hotCode = _hot_mgr->getHotCode(quote->exchg(), quote->code(), quote->tradingdate());
+		isHot = !hotCode.empty();
+	}
+	else if(commInfo->getCategoty() == CC_Stock)
+	{
 		stdCode = CodeHelper::bscStkCodeToStdCode(cInfo->getCode(), cInfo->getExchg());
+	}
+	else if (commInfo->getCategoty() == CC_Option)
+	{
+		stdCode = CodeHelper::bscFutOptCodeToStdCode(cInfo->getCode(), cInfo->getExchg());
+	}
 	quote->setCode(stdCode.c_str());
 
-	_engine->handle_push_quote(quote, !hotCode.empty());
+	_stub->handle_push_quote(quote, isHot);
 
 }
 
@@ -224,13 +264,8 @@ void ParserAdapter::handleParserLog(WTSLogLevel ll, const char* format, ...)
 
 	va_list args;
 	va_start(args, format);
-	WTSLogger::log_dyn_direct("parser", _id.c_str(), ll, format, args);
+	WTSLogger::vlog_dyn("parser", _id.c_str(), ll, format, args);
 	va_end(args);
-}
-
-IBaseDataMgr* ParserAdapter::getBaseDataMgr()
-{
-	return _bd_mgr;
 }
 
 

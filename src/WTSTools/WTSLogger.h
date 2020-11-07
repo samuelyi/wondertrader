@@ -8,10 +8,12 @@
  * \brief 日志模块定义
  */
 #pragma once
-#include "../Share/WTSTypes.h"
-#include "../Share/WTSCollection.hpp"
+#include "../Includes/WTSTypes.h"
+#include "../Includes/WTSCollection.hpp"
+
 #include <memory>
 #include <sstream>
+#include <thread>
 
 #include <spdlog/spdlog.h>
 
@@ -24,6 +26,7 @@ NS_OTP_END
 
 USING_NS_OTP;
 
+#define MAX_LOG_BUF_SIZE 2048
 
 class WTSLogger
 {
@@ -43,7 +46,7 @@ public:
 	static void error(const char* format, ...);
 	static void fatal(const char* format, ...);
 	static void log(WTSLogLevel ll, const char* format, ...);
-	static void log_direct(WTSLogLevel ll, const char* format, va_list args);
+	static void vlog(WTSLogLevel ll, const char* format, va_list& args);
 	static void log_raw(WTSLogLevel ll, const char* message);
 
 	static void debug2(const char* catName, const char* format, ...);
@@ -52,11 +55,11 @@ public:
 	static void error2(const char* catName, const char* format, ...);
 	static void fatal2(const char* catName, const char* format, ...);
 	static void log2(const char* catName, WTSLogLevel ll, const char* format, ...);
-	static void log2_direct(const char* catName, WTSLogLevel ll, const char* format, va_list args);
+	static void vlog2(const char* catName, WTSLogLevel ll, const char* format, va_list& args);
 	static void log2_raw(const char* catName, WTSLogLevel ll, const char* message);
 
 	static void log_dyn(const char* patttern, const char* catName, WTSLogLevel ll, const char* format, ...);
-	static void log_dyn_direct(const char* patttern, const char* catName, WTSLogLevel ll, const char* format, va_list args);
+	static void vlog_dyn(const char* patttern, const char* catName, WTSLogLevel ll, const char* format, va_list& args);
 	static void log_dyn_raw(const char* patttern, const char* catName, WTSLogLevel ll, const char* message);
 
 	static void init(const char* propFile = "logcfg.json", ILogHandler* handler = NULL, WTSLogLevel logLevel = LL_INFO);
@@ -76,38 +79,8 @@ private:
 
 	typedef WTSHashMap<std::string>	LogPatterns;
 	static LogPatterns*			m_mapPatterns;
+
+	static thread_local char	m_buffer[MAX_LOG_BUF_SIZE];
 };
 
-class StreamLogger
-{
-private:
-	std::stringstream	_ss;
-	std::string			_logger;
-	std::string			_pattern;
-	WTSLogLevel			_level;
-
-public:
-	StreamLogger(WTSLogLevel ll, const char* catName = "", const char* pattern = "")
-		: _logger(catName),_pattern(pattern),_level(ll){}
-
-	~StreamLogger()
-	{
-		std::string s = _ss.str();
-		if (s.empty())
-			return;
-
-		const char* catName;
-		if (_logger.empty())
-			catName = "root";
-		else
-			catName = _logger.c_str();
-		if(_pattern.empty())
-			WTSLogger::log2_raw(catName, _level, s.c_str());
-		else
-			WTSLogger::log_dyn_raw(_pattern.c_str(), catName, _level, s.c_str());
-	}
-
-	operator std::stringstream&(){ return _ss; }
-	std::stringstream& self(){ return _ss; }
-};
 

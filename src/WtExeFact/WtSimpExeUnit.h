@@ -9,7 +9,7 @@
 #pragma once
 #include <unordered_set>
 #include <mutex>
-#include "../WtCore/ExecuteDefs.h"
+#include "../Includes/ExecuteDefs.h"
 USING_NS_OTP;
 
 class WtSimpExeUnit : public ExecuteUnit
@@ -44,7 +44,7 @@ public:
 	 *	localid	本地单号
 	 *	code	合约代码
 	 *	isBuy	买or卖
-	 *	leftover	剩余手数
+	 *	leftover	剩余数量
 	 *	price	委托价格
 	 *	isCanceled	是否已撤销
 	 */
@@ -60,10 +60,10 @@ public:
 	 *	成交回报
 	 *	code	合约代码
 	 *	isBuy	买or卖
-	 *	vol		成交手数，这里没有正负，通过isBuy确定买入还是卖出
+	 *	vol		成交数量，这里没有正负，通过isBuy确定买入还是卖出
 	 *	price	成交价格
 	 */
-	virtual void on_trade(const char* stdCode, bool isBuy, double vol, double price) override;
+	virtual void on_trade(uint32_t localid, const char* stdCode, bool isBuy, double vol, double price) override;
 
 	/*
 	 *	下单结果回报
@@ -90,16 +90,17 @@ public:
 private:
 	WTSTickData* _last_tick;	//上一笔行情
 	double		_target_pos;	//目标仓位
-	double		_unsent_qty;	//未发送手数
+	double		_unsent_qty;	//未发送数量
 
 
 	WTSCommodityInfo*	_comm_info;
+	WTSSessionInfo*		_sess_info;
 
 	//////////////////////////////////////////////////////////////////////////
 	//执行参数
 	int32_t		_price_offset;
 	uint32_t	_expire_secs;
-	bool		_use_opposite;
+	int32_t		_price_mode;
 
 	typedef std::unordered_set<uint32_t> IDSet;
 	IDSet			_orders;

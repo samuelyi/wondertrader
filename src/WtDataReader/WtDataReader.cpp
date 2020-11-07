@@ -1,17 +1,23 @@
 #include "WtDataReader.h"
 
-#include "../Share/WTSVariant.hpp"
+#include "../Includes/WTSVariant.hpp"
 #include "../Share/BoostFile.hpp"
 #include "../Share/TimeUtils.hpp"
 #include "../Share/CodeHelper.hpp"
 #include "../Share/StdUtils.hpp"
+#include "../Share/DLLHelper.hpp"
 
-#include "../Share/WTSContractInfo.hpp"
-#include "../Share/IBaseDataMgr.h"
-#include "../Share/IHotMgr.h"
-#include "../Share/WTSDataDef.hpp"
+#include "../Includes/WTSContractInfo.hpp"
+#include "../Includes/IBaseDataMgr.h"
+#include "../Includes/IHotMgr.h"
+#include "../Includes/WTSDataDef.hpp"
 
 #include "../WTSTools/WTSCmpHelper.hpp"
+
+#pragma comment(lib, "libmysql.lib")
+
+#include <rapidjson/document.h>
+namespace rj = rapidjson;
 
 extern "C"
 {
@@ -28,6 +34,63 @@ extern "C"
 	}
 };
 
+#ifdef _WIN32
+#include <wtypes.h>
+HMODULE	g_dllModule = NULL;
+
+BOOL APIENTRY DllMain(
+	HANDLE hModule,
+	DWORD  ul_reason_for_call,
+	LPVOID lpReserved
+)
+{
+	switch (ul_reason_for_call)
+	{
+	case DLL_PROCESS_ATTACH:
+		g_dllModule = (HMODULE)hModule;
+		break;
+	}
+	return TRUE;
+}
+#else
+#include <dlfcn.h>
+
+char PLATFORM_NAME[] = "UNIX";
+
+std::string	g_moduleName;
+
+__attribute__((constructor))
+void on_load(void) {
+	Dl_info dl_info;
+	dladdr((void *)on_load, &dl_info);
+	g_moduleName = dl_info.dli_fname;
+}
+#endif
+
+std::string getBinDir()
+{
+	static std::string _bin_dir;
+	if (_bin_dir.empty())
+	{
+
+
+#ifdef _WIN32
+		char strPath[MAX_PATH];
+		GetModuleFileName(g_dllModule, strPath, MAX_PATH);
+
+		_bin_dir = StrUtil::standardisePath(strPath, false);
+#else
+		_bin_dir = g_moduleName;
+#endif
+
+		uint32_t nPos = _bin_dir.find_last_of('/');
+		_bin_dir = _bin_dir.substr(0, nPos + 1);
+	}
+
+	return _bin_dir;
+}
+
+
 
 WtDataReader::WtDataReader()
 	: _last_time(0)
@@ -41,8 +104,6 @@ WtDataReader::~WtDataReader()
 {
 }
 
-
-//bool WtDataStorage::init(WTSVariant* cfg, WtEngine* engine, IBaseDataMgr* bdMgr, IHotMgr* hotMgr)
 void WtDataReader::init(WTSVariant* cfg, IDataReaderSink* sink)
 {
 	_sink = sink;
@@ -54,14 +115,152 @@ void WtDataReader::init(WTSVariant* cfg, IDataReaderSink* sink)
 
 	_base_dir = cfg->getCString("path");
 	_base_dir = StrUtil::standardisePath(_base_dir);
+
+	WTSVariant* dbConf = cfg->get("db");
+	if (dbConf)
+	{
+		strcpy(_db_conf._host, dbConf->getCString("host"));
+		strcpy(_db_conf._dbname, dbConf->getCString("dbname"));
+		strcpy(_db_conf._user, dbConf->getCString("user"));
+		strcpy(_db_conf._pass, dbConf->getCString("pass"));
+		_db_conf._port = dbConf->getInt32("port");
+
+		_db_conf._active = (strlen(_db_conf._host) > 0) && (strlen(_db_conf._dbname) > 0) && (_db_conf._port != 0);
+		if (_db_conf._active)
+			init_db();
+	}
+
+	bool bAdjLoaded = false;
+	if (_db_conn)
+		bAdjLoaded = loadStkAdjFactorsFromDB();
+	
+	if (!bAdjLoaded && cfg->has("adjfactor"))
+		loadStkAdjFactorsFromFile(cfg->getCString("adjfactor"));
+}
+
+void WtDataReader::init_db()
+{
+	if (!_db_conf._active)
+		return;
+
+#ifdef _WIN32
+	std::string module = getBinDir() + "libmysql.dll";
+	DLLHelper::load_library(module.c_str());
+#endif
+
+	_db_conn.reset(new MysqlDb);
+	my_bool autoreconnect = true;
+	_db_conn->options(MYSQL_OPT_RECONNECT, &autoreconnect);
+	_db_conn->options(MYSQL_SET_CHARSET_NAME, "utf8");
+
+	if (_db_conn->connect(_db_conf._dbname, _db_conf._host, _db_conf._user, _db_conf._pass, _db_conf._port, CLIENT_MULTI_STATEMENTS | CLIENT_MULTI_RESULTS))
+	{
+		if (_sink)
+			_sink->reader_log(LL_INFO, "数据库连接成功:%s:%d", _db_conf._host, _db_conf._port);
+	}
+	else
+	{
+		if (_sink)
+			_sink->reader_log(LL_ERROR, "数据库连接失败[%s:%d]:%s", _db_conf._host, _db_conf._port, _db_conn->errstr());
+		_db_conn.reset();
+	}
+}
+
+bool WtDataReader::loadStkAdjFactorsFromDB()
+{
+	MysqlQuery query(*_db_conn);
+	if(!query.exec("SELECT exchange,code,date,factor FROM tb_adj_factors ORDER BY exchange,code,date DESC;"))
+	{
+		if (_sink)
+			_sink->reader_log(LL_ERROR, "查询除权因子表出错:%s", query.errormsg());
+		return false;
+	}
+
+	uint32_t stk_cnt = 0;
+	uint32_t fct_cnt = 0;
+	while(query.fetch_row())
+	{
+		const char* exchg = query.getstr(0);
+		const char* code = query.getstr(1);
+		uint32_t uDate = query.getuint(2);
+		double factor = query.getdouble(3);
+
+		std::string key = StrUtil::printf("%s.%s", exchg, code);
+		if (_adj_factors.find(key) == _adj_factors.end())
+			stk_cnt++;
+
+		AdjFactorList& fctrLst = _adj_factors[key];
+		AdjFactor adjFact;
+		adjFact._date = uDate;
+		adjFact._factor = factor;
+
+		fctrLst.push_back(adjFact);
+		fct_cnt++;
+	}
+
+	if (_sink) 
+		_sink->reader_log(LL_INFO, "共加载%u只股票的%u条除权因子数据", stk_cnt, fct_cnt);
+	return true;
+}
+
+bool WtDataReader::loadStkAdjFactorsFromFile(const char* adjfile)
+{
+	if(!BoostFile::exists(adjfile))
+	{
+		if (_sink) _sink->reader_log(LL_ERROR, "除权因子文件%s不存在", adjfile);
+		return false;
+	}
+
+	std::string content;
+	BoostFile::read_file_contents(adjfile, content);
+
+	rj::Document doc;
+	doc.Parse(content.c_str());
+
+	if(doc.HasParseError())
+	{
+		if (_sink) _sink->reader_log(LL_ERROR, "除权因子文件%s解析失败", adjfile);
+		return false;
+	}
+
+	uint32_t stk_cnt = 0;
+	uint32_t fct_cnt = 0;
+	for (auto& mExchg : doc.GetObject())
+	{
+		const char* exchg = mExchg.name.GetString();
+		const rj::Value& itemExchg = mExchg.value;
+		for(auto& mCode : itemExchg.GetObject())
+		{
+			const char* code = mCode.name.GetString();
+			const rj::Value& ayFacts = mCode.value;
+			if(!ayFacts.IsArray() )
+				continue;
+
+			std::string key = StrUtil::printf("%s.%s", exchg, code);
+			stk_cnt++;
+
+			AdjFactorList& fctrLst = _adj_factors[key];
+			for (auto& fItem : ayFacts.GetArray())
+			{
+				AdjFactor adjFact;
+				adjFact._date = fItem["date"].GetUint();
+				adjFact._factor = fItem["factor"].GetDouble();
+
+				fctrLst.push_back(adjFact);
+				fct_cnt++;
+			}
+		}
+	}
+
+	if (_sink) _sink->reader_log(LL_INFO, "共加载%u只股票的%u条除权因子数据", stk_cnt, fct_cnt);
+	return true;
 }
 
 WTSTickSlice* WtDataReader::readTickSlice(const char* stdCode, uint32_t count, uint64_t etime /* = 0 */)
 {
-	std::string exchg, code, pid;
-	bool isHot = false;
-	CodeHelper::extractStdCode(stdCode, exchg, code, pid, isHot);
-	std::string stdPID = StrUtil::printf("%s.%s", exchg.c_str(), pid.c_str());
+	CodeHelper::CodeInfo cInfo;
+	CodeHelper::extractStdCode(stdCode, cInfo);
+	std::string stdPID = StrUtil::printf("%s.%s", cInfo._exchg, cInfo._product);
 
 
 	uint32_t curDate, curTime, curSecs;
@@ -86,9 +285,9 @@ WTSTickSlice* WtDataReader::readTickSlice(const char* stdCode, uint32_t count, u
 
 	bool isToday = (endTDate == curTDate);
 
-	std::string curCode = code;
-	if (isHot)
-		curCode = _hot_mgr->getRawCode(exchg.c_str(), pid.c_str(), endTDate);
+	std::string curCode = cInfo._code;
+	if (cInfo._hot && cInfo._category == CC_Future)
+		curCode = _hot_mgr->getRawCode(cInfo._exchg, cInfo._product, endTDate);
 
 	std::vector<WTSTickStruct>	ayTicks;
 
@@ -99,7 +298,7 @@ WTSTickSlice* WtDataReader::readTickSlice(const char* stdCode, uint32_t count, u
 
 	if (isToday)
 	{
-		TBlockPair* tPair = getRTTBlock(exchg.c_str(), curCode.c_str());
+		TBlockPair* tPair = getRTTBlock(cInfo._exchg, curCode.c_str());
 		if (tPair == NULL)
 			return NULL;
 
@@ -134,7 +333,7 @@ WTSTickSlice* WtDataReader::readTickSlice(const char* stdCode, uint32_t count, u
 		if(it == _his_tick_map.end())
 		{
 			std::stringstream ss;
-			ss << _base_dir << "his/ticks/" << exchg << "/" << endTDate << "/" << curCode << ".dsb";
+			ss << _base_dir << "his/ticks/" << cInfo._exchg << "/" << endTDate << "/" << curCode << ".dsb";
 			std::string filename = ss.str();
 			if (!StdFile::exists(filename.c_str()))
 				return NULL;
@@ -205,10 +404,9 @@ WTSTickSlice* WtDataReader::readTickSlice(const char* stdCode, uint32_t count, u
 
 WTSHisTickData* WtDataReader::readTicks(const char* stdCode, uint32_t count, uint64_t etime /* = 0 */, bool bOnlyValid /* = false */)
 {
-	std::string exchg, code, pid;
-	bool isHot = false;
-	CodeHelper::extractStdCode(stdCode, exchg, code, pid, isHot);
-	std::string stdPID = StrUtil::printf("%s.%s", exchg.c_str(), pid.c_str());
+	CodeHelper::CodeInfo cInfo;
+	CodeHelper::extractStdCode(stdCode, cInfo);
+	std::string stdPID = StrUtil::printf("%s.%s", cInfo._exchg, cInfo._product);
 
 	uint32_t curDate, curTime, curSecs;
 	if (etime == 0)
@@ -232,9 +430,9 @@ WTSHisTickData* WtDataReader::readTicks(const char* stdCode, uint32_t count, uin
 
 	bool isToday = (endTDate == curTDate);
 	
-	std::string curCode = code;
-	if (isHot)
-		curCode = _hot_mgr->getRawCode(exchg.c_str(), pid.c_str(), endTDate);
+	std::string curCode = cInfo._code;
+	if (cInfo._hot && cInfo._category == CC_Future)
+		curCode = _hot_mgr->getRawCode(cInfo._exchg, cInfo._product, endTDate);
 
 	std::vector<WTSTickStruct>	ayTicks;
 
@@ -245,7 +443,7 @@ WTSHisTickData* WtDataReader::readTicks(const char* stdCode, uint32_t count, uin
 
 	if(isToday)
 	{
-		TBlockPair* tPair = getRTTBlock(exchg.c_str(), curCode.c_str());
+		TBlockPair* tPair = getRTTBlock(cInfo._exchg, curCode.c_str());
 		if (tPair == NULL)
 			return NULL;
 
@@ -307,7 +505,7 @@ WTSHisTickData* WtDataReader::readTicks(const char* stdCode, uint32_t count, uin
 		if (it == _his_tick_map.end())
 		{
 			std::stringstream ss;
-			ss << _base_dir << "his/ticks/" << exchg << "/" << endTDate << "/" << curCode << ".dsb";
+			ss << _base_dir << "his/ticks/" << cInfo._exchg << "/" << endTDate << "/" << curCode << ".dsb";
 			std::string filename = ss.str();
 			if (!StdFile::exists(filename.c_str()))
 				return NULL;
@@ -407,7 +605,445 @@ WTSHisTickData* WtDataReader::readTicks(const char* stdCode, uint32_t count, uin
 	return ticks;
 }
 
-bool WtDataReader::cacheHisBars(const std::string& key, const char* stdCode, WTSKlinePeriod period)
+bool WtDataReader::cacheHisBarsFromDB(const std::string& key, const char* stdCode, WTSKlinePeriod period)
+{
+	CodeHelper::CodeInfo cInfo;
+	CodeHelper::extractStdCode(stdCode, cInfo);
+	std::string stdPID = StrUtil::printf("%s.%s", cInfo._exchg, cInfo._product);
+
+	uint32_t curDate = TimeUtils::getCurDate();
+	uint32_t curTime = TimeUtils::getCurMin() / 100;
+
+	uint32_t endTDate = _base_data_mgr->calcTradingDate(stdPID.c_str(), curDate, curTime, false);
+
+	std::string tbname, pname;
+	switch (period)
+	{
+	case KP_Minute1: 
+		tbname = "tb_kline_min1"; 
+		pname = "min1";
+		break;
+	case KP_Minute5: 
+		tbname = "tb_kline_min5";
+		pname = "min5"; 
+		break;
+	default: 
+		tbname = "tb_kline_day"; 
+		pname = "day"; 
+		break;
+	}
+
+	BarsList& barList = _bars_cache[key];
+	barList._code = stdCode;
+	barList._period = period;
+	barList._exchg = cInfo._exchg;
+
+	std::vector<std::vector<WTSBarStruct>*> barsSections;
+	bool isDay = (period == KP_DAY);
+
+	uint32_t realCnt = 0;
+	if (cInfo._hot && cInfo._category == CC_Future)//如果是读取期货主力连续数据
+	{
+		HotSections secs;
+		if (!_hot_mgr->splitHotSecions(cInfo._exchg, cInfo._product, 19900102, endTDate, secs))
+			return false;
+
+		if (secs.empty())
+			return false;
+
+		//先按照HOT代码进行读取, 如rb.HOT
+		std::vector<WTSBarStruct>* hotAy = NULL;
+		uint32_t lastHotTime = 0;
+		for (;;)
+		{
+			char sql[256] = { 0 };
+			if (isDay)
+				sprintf(sql, "SELECT `date`,0,open,high,low,close,settle,volume,turnover,interest,diff_interest FROM %s WHERE exchange='%s' AND code='%s.HOT' ORDER BY `date`;", 
+					tbname.c_str(), cInfo._exchg, cInfo._product);
+			else
+				sprintf(sql, "SELECT `date`,`time`,open,high,low,close,0,volume,turnover,interest,diff_interest FROM %s WHERE exchange='%s' AND code='%s.HOT' ORDER BY `time`;",
+					tbname.c_str(), cInfo._exchg, cInfo._product);
+
+			MysqlQuery query(*_db_conn);
+			if(!query.exec(sql))
+			{
+				if (_sink) _sink->reader_log(LL_ERROR, "历史K线读取失败：%s", query.errormsg());
+			}
+			else
+			{
+				uint32_t barcnt = (uint32_t)query.num_rows();
+				hotAy = new std::vector<WTSBarStruct>();
+				hotAy->resize(barcnt);
+
+				uint32_t idx = 0;
+				while(query.fetch_row())
+				{
+					WTSBarStruct& bs = hotAy->at(idx);
+					bs.date = query.getuint(0);
+					bs.time = query.getuint(1);
+					bs.open = query.getdouble(2);
+					bs.high = query.getdouble(3);
+					bs.low = query.getdouble(4);
+					bs.close = query.getdouble(5);
+					bs.settle = query.getdouble(6);
+					bs.vol = query.getuint(7);
+					bs.money = query.getdouble(8);
+					bs.hold = query.getuint(9);
+					bs.add = query.getdouble(10);
+					idx++;
+				}
+
+				if (period != KP_DAY)
+					lastHotTime = hotAy->at(barcnt - 1).time;
+				else
+					lastHotTime = hotAy->at(barcnt - 1).date;
+
+				if (_sink) _sink->reader_log(LL_INFO, "主力合约%s历史%s数据直接缓存%u条", stdCode, pname.c_str(), barcnt);
+			}
+
+			break;
+		}
+
+		bool bAllCovered = false;
+		for (auto it = secs.rbegin(); it != secs.rend() && left > 0; it++)
+		{
+			//const char* curCode = it->first.c_str();
+			//uint32_t rightDt = it->second.second;
+			//uint32_t leftDt = it->second.first;
+			const HotSection& hotSec = *it;
+			const char* curCode = hotSec._code.c_str();
+			uint32_t rightDt = hotSec._e_date;
+			uint32_t leftDt = hotSec._s_date;
+
+			//要先将日期转换为边界时间
+			uint32_t stime, etime;
+			if (!isDay)
+			{
+				uint64_t sTime = _base_data_mgr->getBoundaryTime(stdPID.c_str(), leftDt, false, true);
+				uint64_t eTime = _base_data_mgr->getBoundaryTime(stdPID.c_str(), rightDt, false, false);
+
+				stime = ((uint32_t)(sTime / 10000) - 19900000) * 10000 + (uint32_t)(sTime % 10000);
+
+				if (stime < lastHotTime)	//如果边界时间小于主力的最后一根Bar的时间, 说明已经有交叉了, 则不需要再处理了
+				{
+					bAllCovered = true;
+					stime = lastHotTime + 1;
+				}
+
+				etime = ((uint32_t)(eTime / 10000) - 19900000) * 10000 + (uint32_t)(eTime % 10000);
+
+				if (etime <= lastHotTime)	//右边界时间小于最后一条Hot时间, 说明全部交叉了, 没有再找的必要了
+					break;
+			}
+			else
+			{
+				stime = leftDt;
+				if (stime < lastHotTime)	//如果边界时间小于主力的最后一根Bar的时间, 说明已经有交叉了, 则不需要再处理了
+				{
+					bAllCovered = true;
+					stime = lastHotTime + 1;
+				}
+
+				etime = rightDt;
+
+				if (etime <= lastHotTime)
+					break;
+			}
+
+			char sql[256] = { 0 };
+			if (isDay)
+				sprintf(sql, "SELECT `date`,0,open,high,low,close,settle,volume,turnover,interest,diff_interest FROM %s "
+					"WHERE exchange='%s' AND code='%s' AND `date`>=%u AND `date`<=%u ORDER BY `date`;",
+					tbname.c_str(), cInfo._exchg, curCode, stime, etime);
+			else
+				sprintf(sql, "SELECT `date`,`time`,open,high,low,close,0,volume,turnover,interest,diff_interest FROM %s "
+					"WHERE exchange='%s' AND code='%s' AND `time`>=%u AND `time`<=%u ORDER BY `time`;",
+					tbname.c_str(), cInfo._exchg, curCode, stime, etime);
+
+			MysqlQuery query(*_db_conn);
+			if (!query.exec(sql))
+			{
+				if (_sink) _sink->reader_log(LL_ERROR, "历史K线读取失败：%s", query.errormsg());
+			}
+			else
+			{
+				uint32_t barcnt = (uint32_t)query.num_rows();
+				auto tempAy = new std::vector<WTSBarStruct>();
+				tempAy->resize(barcnt);
+
+				uint32_t idx = 0;
+				while (query.fetch_row())
+				{
+					WTSBarStruct& bs = tempAy->at(idx);
+					bs.date = query.getuint(0);
+					bs.time = query.getuint(1);
+					bs.open = query.getdouble(2);
+					bs.high = query.getdouble(3);
+					bs.low = query.getdouble(4);
+					bs.close = query.getdouble(5);
+					bs.settle = query.getdouble(6);
+					bs.vol = query.getuint(7);
+					bs.money = query.getdouble(8);
+					bs.hold = query.getuint(9);
+					bs.add = query.getdouble(10);
+					idx++;
+				}
+
+				realCnt += barcnt;
+
+				barsSections.push_back(tempAy);
+
+				if (bAllCovered)
+					break;
+			}
+		}
+
+		if (hotAy)
+		{
+			barsSections.push_back(hotAy);
+			realCnt += hotAy->size();
+		}
+	}
+	else if (cInfo._exright && cInfo._category == CC_Stock)//如果是读取股票复权数据
+	{
+		std::vector<WTSBarStruct>* hotAy = NULL;
+		uint32_t lastQTime = 0;
+
+		do
+		{
+			//先直接读取复权过的历史数据，路径如/his/day/sse/SH600000Q.dsb
+			char sql[256] = { 0 };
+			if (isDay)
+				sprintf(sql, "SELECT `date`,0,open,high,low,close,settle,volume,turnover,interest,diff_interest FROM %s WHERE exchange='%s' AND code='%sQ' ORDER BY `date`;",
+					tbname.c_str(), cInfo._exchg, cInfo._code);
+			else
+				sprintf(sql, "SELECT `date`,`time`,open,high,low,close,0,volume,turnover,interest,diff_interest FROM %s WHERE exchange='%s' AND code='%sQ' ORDER BY `time`;",
+					tbname.c_str(), cInfo._exchg, cInfo._code);
+
+			MysqlQuery query(*_db_conn);
+			if (!query.exec(sql))
+			{
+				if (_sink) _sink->reader_log(LL_ERROR, "历史K线读取失败：%s", query.errormsg());
+			}
+			else
+			{
+				uint32_t barcnt = (uint32_t)query.num_rows();
+				hotAy = new std::vector<WTSBarStruct>();
+				hotAy->resize(barcnt);
+
+				uint32_t idx = 0;
+				while (query.fetch_row())
+				{
+					WTSBarStruct& bs = hotAy->at(idx);
+					bs.date = query.getuint(0);
+					bs.time = query.getuint(1);
+					bs.open = query.getdouble(2);
+					bs.high = query.getdouble(3);
+					bs.low = query.getdouble(4);
+					bs.close = query.getdouble(5);
+					bs.settle = query.getdouble(6);
+					bs.vol = query.getuint(7);
+					bs.money = query.getdouble(8);
+					bs.hold = query.getuint(9);
+					bs.add = query.getdouble(10);
+					idx++;
+				}
+
+				if (period != KP_DAY)
+					lastQTime = hotAy->at(barcnt - 1).time;
+				else
+					lastQTime = hotAy->at(barcnt - 1).date;
+
+				if (_sink) _sink->reader_log(LL_INFO, "股票%s历史%s复权数据直接缓存%u条", stdCode, pname.c_str(), barcnt);
+			}
+			break;
+		} while (false);
+
+		bool bAllCovered = false;
+		do
+		{
+			//const char* curCode = it->first.c_str();
+			//uint32_t rightDt = it->second.second;
+			//uint32_t leftDt = it->second.first;
+			const char* curCode = cInfo._code;
+
+			//要先将日期转换为边界时间
+			WTSBarStruct sBar;
+			if (period != KP_DAY)
+			{
+				sBar.date = TimeUtils::minBarToDate(lastQTime);
+
+				sBar.time = lastQTime + 1;
+			}
+			else
+			{
+				sBar.date = lastQTime + 1;
+			}
+
+			char sql[256] = { 0 };
+			if (isDay)
+				sprintf(sql, "SELECT `date`,0,open,high,low,close,settle,volume,turnover,interest,diff_interest FROM %s WHERE exchange='%s' AND code='%s' AND date>=%u ORDER BY `date`;",
+					tbname.c_str(), cInfo._exchg, cInfo._code, lastQTime + 1);
+			else
+				sprintf(sql, "SELECT `date`,`time`,open,high,low,close,0,volume,turnover,interest,diff_interest FROM %s WHERE exchange='%s' AND code='%s' AND time>=%u ORDER BY `time`;",
+					tbname.c_str(), cInfo._exchg, cInfo._code, lastQTime + 1);
+
+			MysqlQuery query(*_db_conn);
+			if (!query.exec(sql))
+			{
+				if (_sink) _sink->reader_log(LL_ERROR, "历史K线读取失败：%s", query.errormsg());
+			}
+			else
+			{
+				uint32_t barcnt = (uint32_t)query.num_rows();
+				if (barcnt > 0)
+				{
+
+					auto tempAy = new std::vector<WTSBarStruct>();
+					tempAy->resize(barcnt);
+
+					uint32_t idx = 0;
+					while (query.fetch_row())
+					{
+						WTSBarStruct& bs = tempAy->at(idx);
+						bs.date = query.getuint(0);
+						bs.time = query.getuint(1);
+						bs.open = query.getdouble(2);
+						bs.high = query.getdouble(3);
+						bs.low = query.getdouble(4);
+						bs.close = query.getdouble(5);
+						bs.settle = query.getdouble(6);
+						bs.vol = query.getuint(7);
+						bs.money = query.getdouble(8);
+						bs.hold = query.getuint(9);
+						bs.add = query.getdouble(10);
+						idx++;
+					}
+
+					realCnt += barcnt;
+
+					auto& ayFactors = getAdjFactors(cInfo._code, cInfo._exchg);
+					if (!ayFactors.empty())
+					{
+						//做前复权处理
+						int32_t lastIdx = barcnt;
+						WTSBarStruct bar;
+						WTSBarStruct* firstBar = tempAy->data();
+						for (auto& adjFact : ayFactors)
+						{
+							bar.date = adjFact._date;
+							double factor = adjFact._factor;
+
+							WTSBarStruct* pBar = NULL;
+							pBar = std::lower_bound(firstBar, firstBar + lastIdx - 1, bar, [period](const WTSBarStruct& a, const WTSBarStruct& b) {
+								return a.date < b.date;
+							});
+
+							if (pBar->date < bar.date)
+								continue;
+
+							WTSBarStruct* endBar = pBar;
+							if (pBar != NULL)
+							{
+								int32_t curIdx = pBar - firstBar;
+								while (pBar && curIdx < lastIdx)
+								{
+									pBar->open /= factor;
+									pBar->high /= factor;
+									pBar->low /= factor;
+									pBar->close /= factor;
+
+									pBar++;
+									curIdx++;
+								}
+								lastIdx = endBar - firstBar;
+							}
+
+							if (lastIdx == 0)
+								break;
+						}
+					}
+
+					barsSections.push_back(tempAy);
+				}
+			}
+		} while (false);
+
+		if (hotAy)
+		{
+			barsSections.push_back(hotAy);
+			realCnt += hotAy->size();
+		}
+	}
+	else
+	{
+		//读取历史的
+		char sql[256] = { 0 };
+		if (isDay)
+			sprintf(sql, "SELECT `date`,0,open,high,low,close,settle,volume,turnover,interest,diff_interest FROM %s WHERE exchange='%s' AND code='%sQ' ORDER BY `date`;",
+				tbname.c_str(), cInfo._exchg, cInfo._code);
+		else
+			sprintf(sql, "SELECT `date`,`time`,open,high,low,close,0,volume,turnover,interest,diff_interest FROM %s WHERE exchange='%s' AND code='%sQ' ORDER BY `time`;",
+				tbname.c_str(), cInfo._exchg, cInfo._code);
+
+		MysqlQuery query(*_db_conn);
+		if (!query.exec(sql))
+		{
+			if (_sink) _sink->reader_log(LL_ERROR, "历史K线读取失败：%s", query.errormsg());
+		}
+		else
+		{
+			uint32_t barcnt = (uint32_t)query.num_rows();
+			if (barcnt > 0)
+			{
+				auto tempAy = new std::vector<WTSBarStruct>();
+				tempAy->resize(barcnt);
+
+				uint32_t idx = 0;
+				while (query.fetch_row())
+				{
+					WTSBarStruct& bs = tempAy->at(idx);
+					bs.date = query.getuint(0);
+					bs.time = query.getuint(1);
+					bs.open = query.getdouble(2);
+					bs.high = query.getdouble(3);
+					bs.low = query.getdouble(4);
+					bs.close = query.getdouble(5);
+					bs.settle = query.getdouble(6);
+					bs.vol = query.getuint(7);
+					bs.money = query.getdouble(8);
+					bs.hold = query.getuint(9);
+					bs.add = query.getdouble(10);
+					idx++;
+				}
+
+				realCnt += barcnt;
+
+				barsSections.push_back(tempAy);
+			}
+		}
+	}
+
+	if (realCnt > 0)
+	{
+		barList._bars.resize(realCnt);
+
+		uint32_t curIdx = 0;
+		for (auto it = barsSections.rbegin(); it != barsSections.rend(); it++)
+		{
+			std::vector<WTSBarStruct>* tempAy = *it;
+			memcpy(barList._bars.data() + curIdx, tempAy->data(), tempAy->size() * sizeof(WTSBarStruct));
+			curIdx += tempAy->size();
+			delete tempAy;
+		}
+		barsSections.clear();
+	}
+
+	if (_sink) _sink->reader_log(LL_INFO, "合约%s的历史%s数据已缓存%u条", stdCode, pname.c_str(), realCnt);
+	return true;
+}
+
+bool WtDataReader::cacheHisBarsFromFile(const std::string& key, const char* stdCode, WTSKlinePeriod period)
 {
 	CodeHelper::CodeInfo cInfo;
 	CodeHelper::extractStdCode(stdCode, cInfo);
@@ -812,6 +1448,48 @@ bool WtDataReader::cacheHisBars(const std::string& key, const char* stdCode, WTS
 					memcpy(tempAy->data(), &firstBar[sIdx], sizeof(WTSBarStruct)*curCnt);
 					realCnt += curCnt;
 
+					auto& ayFactors = getAdjFactors(cInfo._code, cInfo._exchg);
+					if(!ayFactors.empty())
+					{
+						//做前复权处理
+						int32_t lastIdx = curCnt;
+						WTSBarStruct bar;
+						firstBar = tempAy->data();
+						for (auto& adjFact : ayFactors)
+						{
+							bar.date = adjFact._date;
+							double factor = adjFact._factor;
+
+							WTSBarStruct* pBar = NULL;
+							pBar = std::lower_bound(firstBar, firstBar + lastIdx - 1, bar, [period](const WTSBarStruct& a, const WTSBarStruct& b) {
+								return a.date < b.date;
+							});
+
+							if (pBar->date < bar.date)
+								continue;
+
+							WTSBarStruct* endBar = pBar;
+							if (pBar != NULL)
+							{
+								int32_t curIdx = pBar - firstBar;
+								while (pBar && curIdx < lastIdx)
+								{
+									pBar->open /= factor;
+									pBar->high /= factor;
+									pBar->low /= factor;
+									pBar->close /= factor;
+
+									pBar++;
+									curIdx++;
+								}
+								lastIdx = endBar - firstBar;
+							}
+
+							if (lastIdx == 0)
+								break;
+						}
+					}
+
 					barsSections.push_back(tempAy);
 				}
 			}
@@ -1049,7 +1727,10 @@ WTSKlineSlice* WtDataReader::readKlineSlice(const char* stdCode, WTSKlinePeriod 
 	bool bHasHisData = false;
 	if (it == _bars_cache.end())
 	{
-		bHasHisData = cacheHisBars(key, stdCode, period);
+		if(_db_conn)
+			bHasHisData = cacheHisBarsFromDB(key, stdCode, period);
+		else
+			bHasHisData = cacheHisBarsFromFile(key, stdCode, period);
 	}
 	else
 	{
@@ -1141,14 +1822,6 @@ WTSKlineSlice* WtDataReader::readKlineSlice(const char* stdCode, WTSKlinePeriod 
 			left -= (idx - sIdx + 1);
 			rtHead = &kPair->_block->_bars[sIdx];
 			rtCnt = curCnt;
-
-			//std::vector<WTSBarStruct>* tempAy = new std::vector<WTSBarStruct>();
-			//tempAy->resize(curCnt);
-			//memcpy(tempAy->data(), &kPair->_block->_bars[sIdx], sizeof(WTSBarStruct)*curCnt);
-			//realCnt += curCnt;
-
-			//barsSections.push_back(tempAy);
-
 		}
 	}
 
@@ -1167,212 +1840,6 @@ WTSKlineSlice* WtDataReader::readKlineSlice(const char* stdCode, WTSKlinePeriod 
 	return NULL;
 }
 
-/*
-WTSKlineData* WtDataReader::readBars(const char* stdCode, WTSKlinePeriod period, uint32_t count, uint64_t etime)
-{
-	CodeHelper::CodeInfo cInfo;
-	CodeHelper::extractStdCode(stdCode, cInfo);
-	std::string stdPID = StrUtil::printf("%s.%s", cInfo._exchg, cInfo._product);
-
-	std::string key = StrUtil::printf("%s#%u", stdCode, period);
-	auto it = _bars_cache.find(key);
-	bool bHasHisData = false;
-	if (it == _bars_cache.end())
-	{
-		bHasHisData = cacheHisBars(key, stdCode, period);
-	}
-	else
-	{
-		bHasHisData = true;
-	}
-
-	uint32_t curDate, curTime;
-	if(etime == 0)
-	{
-		curDate = _sink->get_date();
-		curTime = _sink->get_min_time();
-		etime = (uint64_t)curDate * 10000 + curTime;
-	}
-	else
-	{
-		curDate = (uint32_t)(etime / 10000);
-		curTime = (uint32_t)(etime % 10000);
-	}
-
-	uint32_t endTDate = _base_data_mgr->calcTradingDate(stdPID.c_str(), curDate, curTime, false);
-	uint32_t curTDate = _base_data_mgr->calcTradingDate(stdPID.c_str(), 0, 0, false);
-
-
-	WTSKlineData* kData = NULL;
-
-	std::vector<std::vector<WTSBarStruct>*> barsSections;
-
-	std::string pname;
-	switch (period)
-	{
-	case KP_Minute1: pname = "min1"; break;
-	case KP_Minute5: pname = "min5"; break;
-	default: pname = "day"; break;
-	}
-
-	uint32_t realCnt = 0;
-	uint32_t left = count;
-	//是否包含当天的
-	bool bHasToday = (endTDate == curTDate);
-
-	if (cInfo._hot && cInfo._category == CC_Future)
-	{
-		_bars_cache[key]._raw_code = _hot_mgr->getRawCode(cInfo._exchg, cInfo._product, curTDate);
-		if (_sink) _sink->reader_log(LL_INFO, "主力合约映射确认: %s -> %s", stdCode, _bars_cache[key]._raw_code.c_str());
-	}
-	else
-	{
-		_bars_cache[key]._raw_code = cInfo._code;
-	}
-
-	if (bHasToday)
-	{
-		WTSBarStruct bar;
-		bar.date = curDate;
-		bar.time = (curDate - 19900000) * 10000 + curTime;
-
-		const char* curCode = _bars_cache[key]._raw_code.c_str();
-
-		//读取实时的
-		RTKBlockPair* kPair = getRTKBlock(cInfo._exchg, curCode, period);
-		if (kPair != NULL)
-		{
-			//读取当日的数据
-			WTSBarStruct* pBar = std::lower_bound(kPair->_block->_bars, kPair->_block->_bars + (kPair->_block->_size - 1), bar, [period](const WTSBarStruct& a, const WTSBarStruct& b){
-				if (period == KP_DAY)
-					return a.date < b.date;
-				else
-					return a.time < b.time;
-			});
-			uint32_t idx = pBar - kPair->_block->_bars;
-			if ((period == KP_DAY && pBar->date > bar.date) || (period != KP_DAY && pBar->time > bar.time))
-			{
-				pBar--;
-				idx--;
-			}
-
-			_bars_cache[key]._rt_cursor = idx;
-
-			uint32_t sIdx = 0;
-			if (left <= idx + 1)
-			{
-				sIdx = idx - left + 1;
-			}
-
-			uint32_t curCnt = (idx - sIdx + 1);
-			left -= (idx - sIdx + 1);
-
-			std::vector<WTSBarStruct>* tempAy = new std::vector<WTSBarStruct>();
-			tempAy->resize(curCnt);
-			memcpy(tempAy->data(), &kPair->_block->_bars[sIdx], sizeof(WTSBarStruct)*curCnt);
-			realCnt += curCnt;
-
-			barsSections.push_back(tempAy);
-		}
-	}
-
-
-	//读取历史的
-	if (left > 0 && bHasHisData)
-	{
-		std::vector<WTSBarStruct>* tempAy = new std::vector<WTSBarStruct>();
-		uint32_t curCnt = readBarsFromCache(key, etime, left, *tempAy, period == KP_DAY);
-		realCnt += curCnt;
-		barsSections.push_back(tempAy);
-	}
-
-	//if(isHot)
-	//{
-	//	_bars_cache[key]._raw_code = _hot_mgr->getRawCode(exchg.c_str(), pid.c_str(), curTDate);
-	//	if (_sink) _sink->reader_log(LL_INFO, "主力合约映射确认: %s -> %s", stdCode, _bars_cache[key]._raw_code.c_str());		
-
-	//	
-
-	//	if (left > 0 && bHasHisData)
-	//	{
-	//		std::vector<WTSBarStruct>* tempAy = new std::vector<WTSBarStruct>();
-	//		uint32_t curCnt = readBarsFromCache(key, etime, left, *tempAy, period == KP_DAY);
-	//		realCnt += curCnt;
-	//		barsSections.push_back(tempAy);
-	//	}
-	//}
-	//else
-	//{
-	//	_bars_cache[key]._raw_code = code;
-
-	//	if (bHasToday)
-	//	{
-	//		WTSBarStruct bar;
-	//		bar.date = curDate;
-	//		bar.time = (curDate - 19900000) * 10000 + curTime;
-
-	//		//读取实时的
-	//		RTKBlockPair* kPair = getRTKBlock(exchg.c_str(), code.c_str(), period);
-	//		if (kPair != NULL)
-	//		{
-	//			//读取当日的数据
-	//			WTSBarStruct* pBar = std::lower_bound(kPair->_block->_bars, kPair->_block->_bars + (kPair->_block->_size - 1), bar, [](const WTSBarStruct& a, const WTSBarStruct& b){
-	//				if (a.date != b.date)
-	//					return a.date < b.date;
-	//				else
-	//					return a.time < b.time;
-	//			});
-	//			uint32_t idx = pBar - kPair->_block->_bars;
-	//			_bars_cache[key]._rt_cursor = idx;
-
-	//			uint32_t sIdx = 0;
-	//			if (count <= idx + 1)
-	//			{
-	//				sIdx = idx - count + 1;
-	//			}
-
-	//			uint32_t curCnt = (idx - sIdx + 1);
-	//			left -= curCnt;
-
-	//			std::vector<WTSBarStruct>* tempAy = new std::vector<WTSBarStruct>();
-	//			tempAy->resize(curCnt);
-	//			memcpy(tempAy->data(), &kPair->_block->_bars[sIdx], sizeof(WTSBarStruct)*curCnt);
-	//			realCnt += curCnt;
-
-	//			barsSections.push_back(tempAy);
-	//		}
-	//	}
-
-	//	//读取历史的
-	//	if(left > 0 && bHasHisData)
-	//	{
-	//		std::vector<WTSBarStruct>* tempAy = new std::vector<WTSBarStruct>();
-	//		uint32_t curCnt = readBarsFromCache(key, etime, left, *tempAy, period == KP_DAY);
-	//		realCnt += curCnt;
-	//		barsSections.push_back(tempAy);
-	//	}
-	//}
-
-	if (realCnt > 0)
-	{
-		kData = WTSKlineData::create(stdCode, realCnt);
-		kData->setPeriod(period);
-		kData->setClosed(!bHasToday);
-
-		uint32_t curIdx = 0;
-		for (auto it = barsSections.rbegin(); it != barsSections.rend(); it++)
-		{
-			std::vector<WTSBarStruct>* tempAy = *it;
-			memcpy(kData->getDataRef().data() + curIdx, tempAy->data(), tempAy->size()*sizeof(WTSBarStruct));
-			curIdx += tempAy->size();
-			delete tempAy;
-		}
-		barsSections.clear();
-	}
-
-	return kData;
-}
-*/
 
 WtDataReader::TBlockPair* WtDataReader::getRTTBlock(const char* exchg, const char* code)
 {
@@ -1546,7 +2013,7 @@ void WtDataReader::onMinuteEnd(uint32_t uDate, uint32_t uTime, uint32_t endTDate
 		}
 		else
 		{
-			if (barsList._bars.size() - 1 > barsList._his_cursor)
+			if (barsList._his_cursor != UINT_MAX && barsList._bars.size() - 1 > barsList._his_cursor)
 			{
 				for (;;)
 				{

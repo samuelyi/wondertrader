@@ -19,15 +19,15 @@
 #include "../Share/decimal.h"
 #include "../Share/CodeHelper.hpp"
 
-#include "../Share/IBaseDataMgr.h"
-#include "../Share/IHotMgr.h"
+#include "../Includes/IBaseDataMgr.h"
+#include "../Includes/IHotMgr.h"
 
-#include "../Share/WTSVariant.hpp"
-#include "../Share/WTSContractInfo.hpp"
-#include "../Share/WTSSessionInfo.hpp"
+#include "../Includes/WTSVariant.hpp"
+#include "../Includes/WTSContractInfo.hpp"
+#include "../Includes/WTSSessionInfo.hpp"
 
-#include "../Share/WTSDataDef.hpp"
-#include "../Share/WTSRiskDef.hpp"
+#include "../Includes/WTSDataDef.hpp"
+#include "../Includes/WTSRiskDef.hpp"
 
 #include "../WTSTools/WTSLogger.h"
 
@@ -50,6 +50,8 @@ WtEngine::WtEngine()
 	, _risk_volscale(1.0)
 	, _risk_date(0)
 	, _terminated(false)
+	, _evt_listener(NULL)
+	, _adapter_mgr(NULL)
 {
 	TimeUtils::getDateTime(_cur_date, _cur_time);
 	_cur_secs = _cur_time % 100000;
@@ -87,10 +89,9 @@ WTSCommodityInfo* WtEngine::get_commodity_info(const char* stdCode)
 
 WTSContractInfo* WtEngine::get_contract_info(const char* stdCode)
 {
-	std::string exchg, code, commID;
-	bool isHot = false;
-	CodeHelper::extractStdCode(stdCode, exchg, code, commID, isHot);
-	return _base_data_mgr->getContract(code.c_str(), exchg.c_str());
+	CodeHelper::CodeInfo cInfo;
+	CodeHelper::extractStdCode(stdCode, cInfo);
+	return _base_data_mgr->getContract(cInfo._code, cInfo._exchg);
 }
 
 WTSSessionInfo* WtEngine::get_session_info(const char* sid, bool isCode /* = false */)
@@ -205,14 +206,14 @@ void WtEngine::update_fund_dynprofit()
 	}
 }
 
-void otp::WtEngine::writeRiskLog(const char* fmt, ...)
+void WtEngine::writeRiskLog(const char* fmt, ...)
 {
 	char szBuf[2048] = { 0 };
 	uint32_t length = sprintf(szBuf, "[资金风控]");
 	strcat(szBuf, fmt);
 	va_list args;
 	va_start(args, fmt);
-	WTSLogger::log2_direct("risk", LL_INFO, szBuf, args);
+	WTSLogger::vlog2("risk", LL_INFO, szBuf, args);
 	va_end(args);
 }
 
@@ -231,23 +232,23 @@ uint32_t WtEngine::getTradingDate()
 	return _cur_tdate;
 }
 
-bool otp::WtEngine::isInTrading()
+bool WtEngine::isInTrading()
 {
 	return false;
 }
 
-void otp::WtEngine::setVolScale(double scale)
+void WtEngine::setVolScale(double scale)
 {
 	double oldScale = _risk_volscale;
 	_risk_volscale = scale;
 	_risk_date = _cur_tdate;
 
-	WTSLogger::info2("risk", "风控仓位系数已改变: %.1f - > %.1f", oldScale, scale);
+	WTSLogger::log2_raw("risk", LL_INFO, fmt::format("风控仓位系数已改变: {} - > {}", oldScale, scale).c_str());
 
 	save_datas();
 }
 
-WTSPortFundInfo* otp::WtEngine::getFundInfo()
+WTSPortFundInfo* WtEngine::getFundInfo()
 {
 	update_fund_dynprofit();
 	save_datas();
@@ -550,7 +551,7 @@ WTSTickData* WtEngine::get_last_tick(uint32_t sid, const char* stdCode)
 	return _data_mgr->grab_last_tick(stdCode);
 }
 
-WTSKlineSlice* WtEngine::get_kline_slice(uint32_t sid, const char* stdCode, const char* period, uint32_t count, uint32_t times /* = 1 */)
+WTSKlineSlice* WtEngine::get_kline_slice(uint32_t sid, const char* stdCode, const char* period, uint32_t count, uint32_t times /* = 1 */, uint64_t etime /* = 0 */)
 {
 	WTSCommodityInfo* cInfo = _base_data_mgr->getCommodity(CodeHelper::stdCodeToStdCommID(stdCode).c_str());
 	if (cInfo == NULL)
@@ -580,7 +581,7 @@ WTSKlineSlice* WtEngine::get_kline_slice(uint32_t sid, const char* stdCode, cons
 		kp = KP_DAY;
 	}
 
-	return _data_mgr->get_kline_slice(stdCode, kp, times, count);
+	return _data_mgr->get_kline_slice(stdCode, kp, times, count, etime);
 }
 
 
@@ -944,7 +945,7 @@ void WtEngine::do_set_position(const char* stdCode, double qty)
 
 	WTSFundStruct& fundInfo = _port_fund->fundInfo();
 
-	if (decimal::gt(pInfo._volumn*diff, 0))//当前持仓和目标仓位方向一致, 增加一条明细, 增加手数即可
+	if (decimal::gt(pInfo._volumn*diff, 0))//当前持仓和目标仓位方向一致, 增加一条明细, 增加数量即可
 	{
 		pInfo._volumn = qty;
 

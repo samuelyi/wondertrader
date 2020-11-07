@@ -9,11 +9,11 @@ SET(CMAKE_CXX_STANDARD 11)
 #3. 环境判断
 IF (WIN32)
 	IF("${CMAKE_GENERATOR}" MATCHES "(Win64|IA64)")
-		SET(INCS $ENV{MyX64Deps12}/include)
-		SET(LNKS $ENV{MyX64Deps12}/lib)
+		SET(INCS $ENV{MyDepends141}/include)
+		SET(LNKS $ENV{MyDepends141}/lib/x64)
 	ELSE()
-		SET(INCS $ENV{MyDepends12}/include)
-		SET(LNKS $ENV{MyDepends12}/lib)
+		SET(INCS $ENV{MyDepends141}/include)
+		SET(LNKS $ENV{MyDepends141}/lib/x86)
 	ENDIF()
 ELSE (UNIX)
 	SET (MyDeps "/home/mydeps")
@@ -32,6 +32,7 @@ SET(LIBS
 	${PROJECT_SOURCE_DIR}/../build/libs/libWTSTools.a
 	${PROJECT_SOURCE_DIR}/../build/libs/libWTSUtils.a
 	
+	${MyDeps}/lib/libmysqlclient.a
 	boost_filesystem
 	pthread
 	dl
@@ -43,15 +44,16 @@ TARGET_LINK_LIBRARIES(WtBtRunner ${LIBS})
 
 
 SET(LIBS
-	${PROJECT_SOURCE_DIR}/../build/bin/libWtBtPorter.so
+	${PROJECT_SOURCE_DIR}/../build/bin/WtBtPorter/libWtBtPorter.so
 	
 	${PROJECT_SOURCE_DIR}/../build/libs/libWTSTools.a
 	${PROJECT_SOURCE_DIR}/../build/libs/libWTSUtils.a
 	
+	${MyDeps}/lib/libmysqlclient.a
 	boost_filesystem
 	pthread
 	dl
 )
-ADD_EXECUTABLE(TestBtPorter TestBtPorter.cpp)
+ADD_EXECUTABLE(TestBtPorter ../TestBtPorter/TestBtPorter.cpp)
 TARGET_LINK_LIBRARIES(TestBtPorter ${LIBS})
 

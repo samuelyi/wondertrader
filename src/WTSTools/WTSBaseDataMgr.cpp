@@ -9,9 +9,9 @@
  */
 #include "WTSBaseDataMgr.h"
 
-#include "../Share/WTSContractInfo.hpp"
-#include "../Share/WTSCollection.hpp"
-#include "../Share/WTSSessionInfo.hpp"
+#include "../Includes/WTSContractInfo.hpp"
+#include "../Includes/WTSCollection.hpp"
+#include "../Includes/WTSSessionInfo.hpp"
 
 #include "../Share/StrUtil.hpp"
 #include "../Share/StdUtils.hpp"
@@ -177,6 +177,10 @@ WTSSessionInfo* WTSBaseDataMgr::getSessionByCode(const char* code, const char* e
 
 bool WTSBaseDataMgr::isHoliday(const char* pid, uint32_t uDate, bool isTpl /* = false */)
 {
+	uint32_t wd = TimeUtils::getWeekDay(uDate);
+	if (wd == 0 || wd == 6)
+		return true;
+
 	std::string tplid = pid;
 	if (!isTpl)
 		tplid = getTplIDByPID(pid);
@@ -310,6 +314,14 @@ bool WTSBaseDataMgr::loadCommodities(const char* filename)
 
 			pCommInfo->setCoverMode((CoverMode)jPInfo["covermode"].GetUint());
 			pCommInfo->setPriceMode((PriceMode)jPInfo["pricemode"].GetUint());
+
+			uint32_t buyQtyUnit = 1;
+			uint32_t sellQtyUnit = 1;
+			if (jPInfo.HasMember("buyqtyunit"))
+				buyQtyUnit = jPInfo["buyqtyunit"].GetUint();
+			if (jPInfo.HasMember("sellqtyunit"))
+				sellQtyUnit = jPInfo["sellqtyunit"].GetUint();
+			pCommInfo->setEntrustQtyUnit(buyQtyUnit, sellQtyUnit);
 
 			std::string key = StrUtil::printf("%s.%s", exchg.c_str(), pid.c_str());
 			if (m_pCommodityMap == NULL)

@@ -11,10 +11,11 @@
 #include <unordered_map>
 #include <unordered_set>
 
-#include "ExecuteDefs.h"
+#include "../Includes/ExecuteDefs.h"
 
-#include "../Share/ITraderApi.h"
+#include "../Includes/ITraderApi.h"
 #include "../Share/BoostDefine.h"
+#include "../Share/BoostFile.hpp"
 
 NS_OTP_BEGIN
 class WTSVariant;
@@ -22,13 +23,14 @@ class ActionPolicyMgr;
 class WTSContractInfo;
 class WTSCommodityInfo;
 class WtExecuter;
+class EventNotifier;
 
 class ITrdNotifySink;
 
 class TraderAdapter : public ITraderApiListener
 {
 public:
-	TraderAdapter();
+	TraderAdapter(EventNotifier* caster = NULL);
 	~TraderAdapter();
 
 	typedef enum tagAdapterState
@@ -39,6 +41,7 @@ public:
 		AS_LOGINFAILED,		//登录失败
 		AS_POSITION_QRYED,	//仓位已查
 		AS_ORDERS_QRYED,	//订单已查
+		AS_TRADES_QRYED,	//成交已查
 		AS_ALLREADY			//全部就绪
 	} AdapterState;
 
@@ -101,7 +104,7 @@ public:
 
 	bool run();
 
-	const char* id() const{ return _id.c_str(); }
+	inline const char* id() const{ return _id.c_str(); }
 
 	AdapterState state() const{ return _state; }
 
@@ -124,8 +127,14 @@ private:
 	inline WTSContractInfo* getContract(const char* stdCode);
 	inline WTSCommodityInfo* getCommodify(const char* stdCommID);
 
-
 	const RiskParams* getRiskParams(const char* stdCode);
+
+	void initSaveData();
+
+	inline void	logTrade(uint32_t localid, const char* stdCode, WTSTradeInfo* trdInfo);
+	inline void	logOrder(uint32_t localid, const char* stdCode, WTSOrderInfo* ordInfo);
+
+	void	saveData(WTSArray* ayFunds = NULL);
 
 public:
 	double getPosition(const char* stdCode, int32_t flag = 3);
@@ -187,6 +196,8 @@ private:
 	FuncDeleteTrader	_remover;
 	AdapterState		_state;
 
+	EventNotifier*		_notifier;
+
 	std::unordered_set<ITrdNotifySink*>	_sinks;
 
 	IBaseDataMgr*		_bd_mgr;
@@ -198,21 +209,28 @@ private:
 	OrderMap*		_orders;
 	std::unordered_set<std::string> _orderids;	//主要用于标记有没有处理过该订单
 
-	std::unordered_map<std::string, double> _undone_qty;	//未完成手数
+	std::unordered_map<std::string, double> _undone_qty;	//未完成数量
 
 	typedef WTSHashMap<std::string>	TradeStatMap;
 	TradeStatMap*	_stat_map;	//统计数据
 
+	//这两个缓存时间内的容器，主要是为了控制瞬间流量而设置的
 	typedef std::vector<uint64_t> TimeCacheList;
 	typedef std::unordered_map<std::string, TimeCacheList> CodeTimeCacheMap;
 	CodeTimeCacheMap	_order_time_cache;	//下单时间缓存
 	CodeTimeCacheMap	_cancel_time_cache;	//撤单时间缓存
 
+	//如果被风控了，就会进入到排除队列
 	std::unordered_set<std::string>	_exclude_codes;
 	
 	typedef std::unordered_map<std::string, RiskParams>	RiskParamsMap;
 	RiskParamsMap	_risk_params_map;
 	bool			_risk_mon_enabled;
+
+	bool			_save_data;	//是否保存交易日志
+	BoostFilePtr	_trades_log;		//交易数据日志
+	BoostFilePtr	_orders_log;		//订单数据日志
+	std::string		_rt_data_file;		//实时数据文件
 };
 
 typedef std::shared_ptr<TraderAdapter>				TraderAdapterPtr;
@@ -228,6 +246,7 @@ public:
 
 	void	run();
 
+	const TraderAdapterMap& getAdapters() const { return _adapters; }
 
 	TraderAdapterPtr getAdapter(const char* tname);
 

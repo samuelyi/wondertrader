@@ -10,13 +10,13 @@
 #include "ParserCTPMini.h"
 #include "../Share/StrUtil.hpp"
 #include "../Share/TimeUtils.hpp"
-#include "../Share/WTSDataDef.hpp"
+#include "../Includes/WTSDataDef.hpp"
 #include "../Share/StdUtils.hpp"
-#include "../Share/WTSContractInfo.hpp"
-#include "../Share/WTSParams.hpp"
+#include "../Includes/WTSContractInfo.hpp"
+#include "../Includes/WTSParams.hpp"
 #include "../Share/StrUtil.hpp"
-#include "../Share/IBaseDataMgr.h"
-#include "../Share/IBaseDataMgr.h"
+#include "../Includes/IBaseDataMgr.h"
+#include "../Includes/IBaseDataMgr.h"
 #include "../Share/DLLHelper.hpp"
 
 #include <boost/filesystem.hpp>
@@ -26,11 +26,6 @@
 #endif
 
 #ifdef _WIN32
-#ifdef _WIN64
-#pragma comment(lib, "./ThostTraderApi/thostmduserapi64.lib")
-#else
-#pragma comment(lib, "./ThostTraderApi/thostmduserapi32.lib")
-#endif
 #include <wtypes.h>
 HMODULE	g_dllModule = NULL;
 
@@ -161,13 +156,22 @@ bool ParserCTPMini::init(WTSParams* config)
 #endif
 	}
 	std::string dllpath = getBinDir() + module;
-	DLLHelper::load_library(dllpath.c_str());
+	m_hInstCTP = DLLHelper::load_library(dllpath.c_str());
 	std::string path = StrUtil::printf("CTPMiniParserFlow/%s/%s/", m_strBroker.c_str(), m_strUserID.c_str());
 	if (!StdFile::exists(path.c_str()))
 	{
 		boost::filesystem::create_directories(boost::filesystem::path(path));
 	}
-	m_pUserAPI = CThostFtdcMdApi::CreateFtdcMdApi(path.c_str());
+#ifdef _WIN32
+#	ifdef _WIN64
+	const char* creatorName = "?CreateFtdcMdApi@CThostFtdcMdApi@@SAPEAV1@PEBD_N1@Z";
+#	else
+	const char* creatorName = "?CreateFtdcMdApi@CThostFtdcMdApi@@SAPAV1@PBD_N1@Z";
+#	endif
+#else
+	const char* creatorName = "_ZN15CThostFtdcMdApi15CreateFtdcMdApiEPKcbb";
+#endif
+	m_funcCreator = (CTPCreator)DLLHelper::get_symbol(m_hInstCTP, creatorName);
 	m_pUserAPI->RegisterSpi(this);
 	m_pUserAPI->RegisterFront((char*)m_strFrontAddr.c_str());
 

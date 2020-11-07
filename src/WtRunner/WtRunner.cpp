@@ -7,14 +7,13 @@
  * 
  * \brief 
  */
-#include "stdafx.h"
 #include "WtRunner.h"
 
 #include "..\WtCore\WtHelper.h"
 #include "..\WtCore\CtaStraContext.h"
 #include "..\WtCore\HftStraContext.h"
 
-#include "..\Share\WTSVariant.hpp"
+#include "..\Includes\WTSVariant.hpp"
 #include "..\Share\StdUtils.hpp"
 #include "..\WTSTools\WTSLogger.h"
 #include "..\Share\JsonToVariant.hpp"
@@ -51,6 +50,13 @@ bool WtRunner::config(const char* cfgFile)
 	BoostFile::read_file_contents(cfgFile, json);
 	rj::Document document;
 	document.Parse(json.c_str());
+
+	if(document.HasParseError())
+	{
+		auto ec = document.GetParseError();
+		WTSLogger::error("配置文件解析失败");
+		return false;
+	}
 
 	_config = WTSVariant::createObject();
 	jsonToVariant(document, _config);
@@ -200,6 +206,8 @@ bool WtRunner::initEnv()
 		WTSLogger::info("交易环境初始化完成，交易引擎：CTA");
 	}
 
+	_engine->set_adapter_mgr(&_traders);
+
 	return true;
 }
 
@@ -234,7 +242,7 @@ bool WtRunner::initParsers()
 		const char* id = cfgItem->getCString("id");
 
 		ParserAdapterPtr adapter(new ParserAdapter);
-		adapter->init(id, cfgItem, _engine);
+		adapter->init(id, cfgItem, _engine, &_bd_mgr, &_hot_mgr);
 
 		_parsers.addAdapter(id, adapter);
 	}

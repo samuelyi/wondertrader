@@ -13,15 +13,16 @@
 #include "WtDataManager.h"
 #include "WtCtaTicker.h"
 #include "WtHelper.h"
+#include "TraderAdapter.h"
 
 #include "../Share/CodeHelper.hpp"
 #include "../Share/StrUtil.hpp"
-#include "../Share/WTSVariant.hpp"
+#include "../Includes/WTSVariant.hpp"
 #include "../Share/TimeUtils.hpp"
-#include "../Share/IBaseDataMgr.h"
-#include "../Share/IHotMgr.h"
-#include "../Share/WTSContractInfo.hpp"
-#include "../Share/WTSRiskDef.hpp"
+#include "../Includes/IBaseDataMgr.h"
+#include "../Includes/IHotMgr.h"
+#include "../Includes/WTSContractInfo.hpp"
+#include "../Includes/WTSRiskDef.hpp"
 #include "../Share/decimal.h"
 #include "../Share/StdUtils.hpp"
 
@@ -38,7 +39,6 @@ boost::asio::io_service g_asyncIO;
 
 WtCtaEngine::WtCtaEngine()
 	: _tm_ticker(NULL)
-	, _evt_listener(NULL)
 {
 	
 }
@@ -67,14 +67,25 @@ void WtCtaEngine::run(bool bAsync /* = false */)
 		rj::Document root(rj::kObjectType);
 		rj::Document::AllocatorType &allocator = root.GetAllocator();
 
-		rj::Value jList(rj::kArrayType);
+		rj::Value jStraList(rj::kArrayType);
 		for (auto& m : _ctx_map)
 		{
 			const CtaContextPtr& ctx = m.second;
-			jList.PushBack(rj::Value(ctx->name(), allocator), allocator);
+			jStraList.PushBack(rj::Value(ctx->name(), allocator), allocator);
 		}
 
-		root.AddMember("marks", jList, allocator);
+		root.AddMember("marks", jStraList, allocator);
+
+		rj::Value jChnlList(rj::kArrayType);
+		for (auto& m : _adapter_mgr->getAdapters())
+		{
+			const TraderAdapterPtr& adapter = m.second;
+			jChnlList.PushBack(rj::Value(adapter->id(), allocator), allocator);
+		}
+
+		root.AddMember("channels", jChnlList, allocator);
+
+		root.AddMember("engine", rj::Value("CTA", allocator), allocator);
 
 		std::string filename = WtHelper::getBaseDir();
 		filename += "marker.json";
@@ -132,11 +143,10 @@ void WtCtaEngine::on_init()
 			std::string realCode = stdCode;
 			if (StrUtil::endsWith(realCode, ".HOT", false))
 			{
-				std::string exchg, pid, code;
-				bool isHot = false;
-				CodeHelper::extractStdCode(stdCode, exchg, code, pid, isHot);
-				code = _hot_mgr->getRawCode(exchg.c_str(), pid.c_str(), _cur_tdate);
-				realCode = CodeHelper::bscFutCodeToStdCode(code.c_str(), exchg.c_str());
+				CodeHelper::CodeInfo cInfo;
+				CodeHelper::extractStdCode(stdCode, cInfo);
+				std::string code = _hot_mgr->getRawCode(cInfo._exchg, cInfo._product, _cur_tdate);
+				realCode = CodeHelper::bscFutCodeToStdCode(code.c_str(), cInfo._exchg);
 			}
 
 			double& vol = target_pos[realCode];
@@ -146,11 +156,12 @@ void WtCtaEngine::on_init()
 		});
 	}
 
-	for (auto it = _executers.begin(); it != _executers.end(); it++)
-	{
-		WtExecuterPtr& executer = (*it);
-		executer->set_position(target_pos);
-	}
+	//for (auto it = _executers.begin(); it != _executers.end(); it++)
+	//{
+	//	WtExecuterPtr& executer = (*it);
+	//	executer->set_position(target_pos);
+	//}
+	_exec_mgr.set_positions(target_pos);
 
 	if (_evt_listener)
 		_evt_listener->on_initialize_event();
@@ -210,11 +221,10 @@ void WtCtaEngine::on_schedule(uint32_t curDate, uint32_t curTime)
 				std::string realCode = stdCode;
 				if (StrUtil::endsWith(realCode, ".HOT", false))
 				{
-					std::string exchg, pid, code;
-					bool isHot = false;
-					CodeHelper::extractStdCode(stdCode, exchg, code, pid, isHot);
-					code = _hot_mgr->getRawCode(exchg.c_str(), pid.c_str(), _cur_tdate);
-					realCode = CodeHelper::bscFutCodeToStdCode(code.c_str(), exchg.c_str());
+					CodeHelper::CodeInfo cInfo;
+					CodeHelper::extractStdCode(stdCode, cInfo);
+					std::string code = _hot_mgr->getRawCode(cInfo._exchg, cInfo._product, _cur_tdate);
+					realCode = CodeHelper::bscFutCodeToStdCode(code.c_str(), cInfo._exchg);
 				}
 
 				double& vol = target_pos[realCode];
@@ -243,7 +253,7 @@ void WtCtaEngine::on_schedule(uint32_t curDate, uint32_t curTime)
 		if (bRiskEnabled && pos != 0)
 		{
 			double symbol = pos / abs(pos);
-			pos = abs(pos)*_risk_volscale*symbol;
+			pos = decimal::rnd(abs(pos)*_risk_volscale)*symbol;
 		}
 		
 		push_task([this, stdCode, pos](){
@@ -254,9 +264,9 @@ void WtCtaEngine::on_schedule(uint32_t curDate, uint32_t curTime)
 	for(auto& m : _pos_map)
 	{
 		std::string stdCode = m.first;
-		if(target_pos.find(m.first) == target_pos.end())
+		if (target_pos.find(stdCode) == target_pos.end())
 		{
-			if(m.second._volumn != 0)
+			if(!decimal::eq(m.second._volumn, 0))
 			{
 				push_task([this, stdCode](){
 					append_signal(stdCode.c_str(), 0);
@@ -264,6 +274,8 @@ void WtCtaEngine::on_schedule(uint32_t curDate, uint32_t curTime)
 
 				WTSLogger::error("品种%s不在目标仓位内，自动设置为0", stdCode.c_str());
 			}
+
+			target_pos[stdCode] = 0;
 		}
 	}
 
@@ -271,11 +283,12 @@ void WtCtaEngine::on_schedule(uint32_t curDate, uint32_t curTime)
 		update_fund_dynprofit();
 	});
 
-	for (auto it = _executers.begin(); it != _executers.end(); it++)
-	{
-		WtExecuterPtr& executer = (*it);
-		executer->set_position(target_pos);
-	}
+	//for (auto it = _executers.begin(); it != _executers.end(); it++)
+	//{
+	//	WtExecuterPtr& executer = (*it);
+	//	executer->set_position(target_pos);
+	//}
+	_exec_mgr.set_positions(target_pos);
 
 	save_datas();
 
@@ -295,11 +308,10 @@ void WtCtaEngine::handle_pos_change(const char* stdCode, double diffQty)
 	std::string realCode = stdCode;
 	if (CodeHelper::isStdFutHotCode(stdCode))
 	{
-		std::string exchg, pid, code;
-		bool isHot = false;
-		CodeHelper::extractStdCode(stdCode, exchg, code, pid, isHot);
-		code = _hot_mgr->getRawCode(exchg.c_str(), pid.c_str(), _cur_tdate);
-		realCode = CodeHelper::bscFutCodeToStdCode(code.c_str(), exchg.c_str());
+		CodeHelper::CodeInfo cInfo;
+		CodeHelper::extractStdCode(stdCode, cInfo);
+		std::string code = _hot_mgr->getRawCode(cInfo._exchg, cInfo._product, _cur_tdate);
+		realCode = CodeHelper::bscFutCodeToStdCode(code.c_str(), cInfo._exchg);
 	}
 
 	PosInfo& pItem = _pos_map[realCode];
@@ -314,18 +326,19 @@ void WtCtaEngine::handle_pos_change(const char* stdCode, double diffQty)
 	if (bRiskEnabled && targetPos != 0)
 	{
 		double symbol = targetPos / abs(targetPos);
-		targetPos = abs(targetPos)*_risk_volscale*symbol;
+		targetPos = decimal::rnd(abs(targetPos)*_risk_volscale)*symbol;
 	}
 
 	push_task([this, realCode, targetPos](){
 		append_signal(realCode.c_str(), targetPos);
 	});
 		
-	for (auto it = _executers.begin(); it != _executers.end(); it++)
-	{
-		WtExecuterPtr& executer = (*it);
-		executer->on_position_changed(realCode.c_str(), targetPos);
-	}
+	//for (auto it = _executers.begin(); it != _executers.end(); it++)
+	//{
+	//	WtExecuterPtr& executer = (*it);
+	//	executer->on_position_changed(realCode.c_str(), targetPos);
+	//}
+	_exec_mgr.handle_pos_change(realCode.c_str(), targetPos);
 }
 
 void WtCtaEngine::on_tick(const char* stdCode, WTSTickData* curTick)
@@ -339,11 +352,7 @@ void WtCtaEngine::on_tick(const char* stdCode, WTSTickData* curTick)
 	if (it != _subed_raw_codes.end())
 	{
 		//是否主力合约代码的标记, 主要用于给执行器发数据的
-		for (auto it = _executers.begin(); it != _executers.end(); it++)
-		{
-			WtExecuterPtr& executer = (*it);
-			executer->on_tick(stdCode, curTick);
-		}
+		_exec_mgr.handle_tick(stdCode, curTick);
 	}
 
 	auto sit = _tick_sub_map.find(stdCode);
@@ -412,4 +421,23 @@ bool WtCtaEngine::isInTrading()
 uint32_t WtCtaEngine::transTimeToMin(uint32_t uTime)
 {
 	return _tm_ticker->time_to_mins(uTime);
+}
+
+WTSCommodityInfo* WtCtaEngine::get_comm_info(const char* stdCode)
+{
+	return _base_data_mgr->getCommodity(CodeHelper::stdCodeToStdCommID(stdCode).c_str());
+}
+
+WTSSessionInfo* WtCtaEngine::get_sess_info(const char* stdCode)
+{
+	WTSCommodityInfo* cInfo = _base_data_mgr->getCommodity(CodeHelper::stdCodeToStdCommID(stdCode).c_str());
+	if (cInfo == NULL)
+		return NULL;
+
+	return _base_data_mgr->getSession(cInfo->getSession());
+}
+
+uint64_t WtCtaEngine::get_real_time()
+{
+	return TimeUtils::makeTime(_cur_date, _cur_raw_time * 100000 + _cur_secs);
 }

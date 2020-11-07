@@ -11,7 +11,7 @@
 #include <stdint.h>
 #include <atomic>
 
-#include "../Share/WTSMarcos.h"
+#include "../Includes/WTSMarcos.h"
 #include "../Share/BoostDefine.h"
 
 NS_OTP_BEGIN
@@ -52,7 +52,7 @@ private:
 private:
 	WTSSessionInfo*	_s_info;
 	WtCtaEngine*	_engine;
-	IDataReader*		_store;
+	IDataReader*	_store;
 
 	uint32_t	_date;
 	uint32_t	_time;

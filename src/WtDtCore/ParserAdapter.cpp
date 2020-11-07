@@ -12,10 +12,10 @@
 #include "StateMonitor.h"
 
 #include "../Share/TimeUtils.hpp"
-#include "../Share/WTSParams.hpp"
-#include "../Share/WTSContractInfo.hpp"
-#include "../Share/WTSDataDef.hpp"
-#include "../Share/CodeHelper.hpp"
+#include "../Share/StrUtil.hpp"
+#include "../Includes/WTSParams.hpp"
+#include "../Includes/WTSContractInfo.hpp"
+#include "../Includes/WTSDataDef.hpp"
 
 #include "../WTSTools/WTSBaseDataMgr.h"
 #include "../WTSTools/WTSLogger.h"
@@ -199,11 +199,6 @@ void ParserAdapter::handleTransaction(WTSTransData* transData)
 	if (contract == NULL)
 		return;
 
-	WTSCommodityInfo* commInfo = m_bdMgr->getCommodity(contract);
-	if (commInfo == NULL)
-		return;
-
-
 	m_dtMgr->writeTransaction(transData);
 }
 
@@ -222,11 +217,6 @@ void ParserAdapter::handleOrderDetail(WTSOrdDtlData* ordDetailData)
 	if (contract == NULL)
 		return;
 
-	WTSCommodityInfo* commInfo = m_bdMgr->getCommodity(contract);
-	if (commInfo == NULL)
-		return;
-
-
 	m_dtMgr->writeOrderDetail(ordDetailData);
 }
 
@@ -244,12 +234,7 @@ void ParserAdapter::handleOrderQueue(WTSOrdQueData* ordQueData)
 	WTSContractInfo* contract = m_bdMgr->getContract(ordQueData->code(), ordQueData->exchg());
 	if (contract == NULL)
 		return;
-
-	WTSCommodityInfo* commInfo = m_bdMgr->getCommodity(contract);
-	if (commInfo == NULL)
-		return;
-
-
+		
 	m_dtMgr->writeOrderQueue(ordQueData);
 }
 
@@ -267,11 +252,6 @@ void ParserAdapter::handleQuote( WTSTickData *quote, bool bNeedSlice )
 	WTSContractInfo* contract = m_bdMgr->getContract(quote->code(), quote->exchg());
 	if (contract == NULL)
 		return;
-
-	WTSCommodityInfo* commInfo = m_bdMgr->getCommodity(contract);
-	if (commInfo == NULL)
-		return;
-
 
 	if (!m_dtMgr->writeTick(quote, bNeedSlice))
 		return;

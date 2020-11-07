@@ -8,17 +8,17 @@
  * \brief 
  */
 #include "TraderCTPMini.h"
-#include "../Share/WTSError.hpp"
-#include "../Share/WTSContractInfo.hpp"
-#include "../Share/WTSSessionInfo.hpp"
-#include "../Share/WTSTradeDef.hpp"
-#include "../Share/WTSDataDef.hpp"
-#include "../Share/WTSParams.hpp"
+#include "../Includes/WTSError.hpp"
+#include "../Includes/WTSContractInfo.hpp"
+#include "../Includes/WTSSessionInfo.hpp"
+#include "../Includes/WTSTradeDef.hpp"
+#include "../Includes/WTSDataDef.hpp"
+#include "../Includes/WTSParams.hpp"
 #include "../Share/StdUtils.hpp"
 #include "../Share/TimeUtils.hpp"
-#include "../Share/IBaseDataMgr.h"
-#include "../Share/DLLHelper.hpp"
+#include "../Includes/IBaseDataMgr.h"
 #include "../Share/decimal.h"
+#include "../Share/StrUtil.hpp"
 
 #ifdef _WIN32
 #include <wtypes.h>
@@ -161,7 +161,11 @@ bool TraderCTPMini::init(WTSParams* params)
 
 	m_hInstCTP = DLLHelper::load_library(m_strModule.c_str());
 #ifdef _WIN32
+#	ifdef _WIN64
+	const char* creatorName = "?CreateFtdcTraderApi@CThostFtdcTraderApi@@SAPEAV1@PEBD@Z";
+#	else
 	const char* creatorName = "?CreateFtdcTraderApi@CThostFtdcTraderApi@@SAPAV1@PBD@Z";
+#	endif
 #else
 	const char* creatorName = "_ZN19CThostFtdcTraderApi19CreateFtdcTraderApiEPKc";
 #endif

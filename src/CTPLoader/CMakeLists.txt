@@ -10,11 +10,11 @@ SET(CMAKE_CXX_STANDARD 11)
 #4. 添加包含文件目录
 IF (WIN32)
 	IF("${CMAKE_GENERATOR}" MATCHES "(Win64|IA64)")
-		SET(INCS $ENV{MyX64Deps12}/include)
-		SET(LNKS $ENV{MyX64Deps12}/lib)
+		SET(INCS $ENV{MyDepends141}/include)
+		SET(LNKS $ENV{MyDepends141}/lib/x64)
 	ELSE()
-		SET(INCS $ENV{MyDepends12}/include)
-		SET(LNKS $ENV{MyDepends12}/lib)
+		SET(INCS $ENV{MyDepends141}/include)
+		SET(LNKS $ENV{MyDepends141}/lib/x86)
 	ENDIF()
 ELSE (UNIX)
 	SET (MyDeps "/home/mydeps")
@@ -38,9 +38,7 @@ SET(SRC
 INCLUDE_DIRECTORIES(${INCS})
 LINK_DIRECTORIES(${LNKS})
 
-SET(LIBS
-	${PROJECT_SOURCE_DIR}/ThostTraderApi/libthosttraderapi_se.so
-	
+SET(LIBS	
 	boost_filesystem
 	dl
 )
@@ -48,11 +46,6 @@ SET(LIBS
 #9. 生成可执行文件
 ADD_EXECUTABLE(CTPLoader ${SRC})
 IF (WIN32)
-	IF ("${CMAKE_GENERATOR}" MATCHES "(Win64|IA64)")
-		TARGET_LINK_LIBRARIES(CTPLoader thostmduserapi )
-	ELSE ()
-		TARGET_LINK_LIBRARIES(CTPLoader thostmduserapi32 )
-	ENDIF ()
 ELSE (UNIX)
 	TARGET_LINK_LIBRARIES(CTPLoader ${LIBS})
 ENDIF ()

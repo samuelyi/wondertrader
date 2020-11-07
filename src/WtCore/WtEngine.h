@@ -14,9 +14,11 @@
 #include <unordered_set>
 #include <unordered_map>
 
-#include "RiskMonDefs.h"
+#include "ParserAdapter.h"
 
-#include "../Share/WTSMarcos.h"
+#include "../Includes/WTSMarcos.h"
+#include "../Includes/RiskMonDefs.h"
+
 #include "../Share/BoostDefine.h"
 #include "../Share/DLLHelper.hpp"
 
@@ -40,6 +42,7 @@ class WTSKlineSlice;
 class WTSPortFundInfo;
 
 class WtDataManager;
+class TraderAdapterMgr;
 
 typedef std::function<void()>	TaskItem;
 
@@ -64,10 +67,20 @@ private:
 };
 typedef std::shared_ptr<WtRiskMonWrapper>	WtRiskMonPtr;
 
-class WtEngine : public WtPortContext
+class IEngineEvtListener
+{
+public:
+	virtual void on_initialize_event() {}
+	virtual void on_schedule_event(uint32_t uDate, uint32_t uTime) {}
+	virtual void on_session_event(uint32_t uDate, bool isBegin = true) {}
+};
+
+class WtEngine : public WtPortContext, public IParserStub
 {
 public:
 	WtEngine();
+
+	inline void set_adapter_mgr(TraderAdapterMgr* mgr) { _adapter_mgr = mgr; }
 
 	void set_date_time(uint32_t curDate, uint32_t curTime, uint32_t curSecs = 0, uint32_t rawTime = 0);
 
@@ -87,7 +100,7 @@ public:
 
 	WTSTickData*	get_last_tick(uint32_t sid, const char* stdCode);
 	WTSTickSlice*	get_tick_slice(uint32_t sid, const char* stdCode, uint32_t count);
-	WTSKlineSlice*	get_kline_slice(uint32_t sid, const char* stdCode, const char* period, uint32_t count, uint32_t times = 1);
+	WTSKlineSlice*	get_kline_slice(uint32_t sid, const char* stdCode, const char* period, uint32_t count, uint32_t times = 1, uint64_t etime = 0);
 
 	void sub_tick(uint32_t sid, const char* code);
 
@@ -98,6 +111,11 @@ public:
 	inline void setRiskMonitor(WtRiskMonPtr& monitor)
 	{
 		_risk_mon = monitor;
+	}
+
+	inline void regEventListener(IEngineEvtListener* listener)
+	{
+		_evt_listener = listener;
 	}
 
 	//////////////////////////////////////////////////////////////////////////
@@ -115,6 +133,10 @@ public:
 	virtual uint32_t	getTradingDate() override;
 	virtual uint32_t	transTimeToMin(uint32_t uTime) override{ return 0; }
 
+	//////////////////////////////////////////////////////////////////////////
+	/// IParserStub接口
+	virtual void handle_push_quote(WTSTickData* newTick, bool isHot) override;
+
 public:
 	virtual void init(WTSVariant* cfg, IBaseDataMgr* bdMgr, WtDataManager* dataMgr, IHotMgr* hotMgr);
 
@@ -124,11 +146,10 @@ public:
 
 	virtual void on_bar(const char* stdCode, const char* period, uint32_t times, WTSBarStruct* newBar) = 0;
 
-	virtual void handle_push_quote(WTSTickData* newTick, bool isHot);
-
 	virtual void on_init(){}
 	virtual void on_session_begin();
 	virtual void on_session_end();
+
 
 protected:
 	/*
@@ -177,6 +198,7 @@ protected:
 	IBaseDataMgr*	_base_data_mgr;	//基础数据管理器
 	IHotMgr*		_hot_mgr;		//主力管理器
 	WtDataManager*	_data_mgr;		//数据管理器
+	IEngineEvtListener*	_evt_listener;
 
 	typedef std::unordered_set<uint32_t> SIDSet;
 	typedef std::unordered_map<std::string, SIDSet>	StraSubMap;
@@ -305,5 +327,7 @@ protected:
 	WtRiskMonPtr	_risk_mon;
 	double			_risk_volscale;
 	uint32_t		_risk_date;
+
+	TraderAdapterMgr*	_adapter_mgr;
 };
 NS_OTP_END

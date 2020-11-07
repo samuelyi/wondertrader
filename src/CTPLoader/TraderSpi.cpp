@@ -6,21 +6,13 @@
 
 #include "./ThostTraderApi/ThostFtdcTraderApi.h"
 #include "../Share/StrUtil.hpp"
-#include "../Share/WTSTypes.h"
+#include "../Includes/WTSTypes.h"
 
 #include <rapidjson/document.h>
 #include <rapidjson/prettywriter.h>
 namespace rj = rapidjson;
 
 #include "TraderSpi.h"
-
-#ifdef _WIN32
-#ifdef _WIN64
-#pragma comment(lib, "./ThostTraderApi/thosttraderapi.lib")
-#else
-#pragma comment(lib, "./ThostTraderApi/thosttraderapi32.lib")
-#endif
-#endif
 
 
 USING_NS_OTP;
@@ -42,7 +34,10 @@ extern std::string	SAVEPATH;	//保存位置
 extern std::string	HOTFILE;
 extern std::string	APPID;
 extern std::string	AUTHCODE;
-extern bool			ISFOROPTION;;
+extern bool			ISFOROPTION;
+
+extern std::string COMM_FILE;		//输出的品种文件名
+extern std::string CONT_FILE;		//输出的合约文件名
 
 // 请求编号
 extern int iRequestID;
@@ -193,14 +188,26 @@ void CTraderSpi::ReqQryInstrument()
 	std::cerr << "--->>> 请求查询合约: " << ((iResult == 0) ? "成功" : "失败") << std::endl;
 }
 
+inline bool isOption(TThostFtdcProductClassType pClass)
+{
+	if (pClass == THOST_FTDC_PC_Options || pClass == THOST_FTDC_PC_SpotOption)
+		return true;
+	
+	return false;
+}
+
+inline bool isFuture(TThostFtdcProductClassType pClass)
+{
+	return pClass == THOST_FTDC_PC_Futures;
+}
 
 void CTraderSpi::OnRspQryInstrument(CThostFtdcInstrumentField *pInstrument, CThostFtdcRspInfoField *pRspInfo, int nRequestID, bool bIsLast)
 {
-	std::cerr << "--->>> " << "OnRspQryInstrument" << std::endl;
 	if (!IsErrorRspInfo(pRspInfo))
 	{
-		if (pInstrument->ProductClass == (ISFOROPTION ? THOST_FTDC_PC_Options: THOST_FTDC_PC_Futures))
-		{			
+		if (pInstrument && ISFOROPTION?isOption(pInstrument->ProductClass):isFuture(pInstrument->ProductClass))
+		{		
+			std::cerr << "--->>> OnRspQryInstrument: " << pInstrument->ExchangeID << "." << pInstrument->InstrumentID << std::endl;
 			std::string pname = MAP_NAME[pInstrument->ProductID];
 			std::string cname = "";
 			if (pname.empty())
@@ -210,9 +217,16 @@ void CTraderSpi::OnRspQryInstrument(CThostFtdcInstrumentField *pInstrument, CTho
 			}
 			else
 			{
-				std::string month = pInstrument->InstrumentID;
-				month = month.substr(strlen(pInstrument->ProductID));
-				cname = pname + month;
+				if(ISFOROPTION)
+				{
+					cname = pInstrument->InstrumentName;
+				}
+				else
+				{
+					std::string month = pInstrument->InstrumentID;
+					month = month.substr(strlen(pInstrument->ProductID));
+					cname = pname + month;
+				}
 			}
 
 			Contract contract;
@@ -353,7 +367,7 @@ void CTraderSpi::DumpToJson()
 
 	std::ofstream ofs;
 	std::string path = SAVEPATH;
-	path += "commodities.json";
+	path += COMM_FILE;
 	ofs.open(path);
 	{
 		rj::StringBuffer sb;
@@ -364,7 +378,7 @@ void CTraderSpi::DumpToJson()
 	ofs.close();
 
 	path = SAVEPATH;
-	path += "contracts.json";
+	path += CONT_FILE;
 	ofs.open(path);
 	{
 		rj::StringBuffer sb;

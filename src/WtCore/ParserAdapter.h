@@ -12,13 +12,19 @@
 #include <unordered_map>
 #include <boost/core/noncopyable.hpp>
 
-#include "../Share/IParserApi.h"
+#include "../Includes/IParserApi.h"
 #include "../Share/BoostDefine.h"
 
 
 NS_OTP_BEGIN
-class WtEngine;
 class WTSVariant;
+class IHotMgr;
+
+class IParserStub
+{
+public:
+	virtual void			handle_push_quote(WTSTickData* curTick, bool isHot = false){}
+};
 
 class ParserAdapter : public IParserApiListener,
 					private boost::noncopyable
@@ -28,7 +34,7 @@ public:
 	~ParserAdapter();
 
 public:
-	bool	init(const char* id, WTSVariant* cfg, WtEngine* engine);
+	bool	init(const char* id, WTSVariant* cfg, IParserStub* stub, IBaseDataMgr* bgMgr, IHotMgr* hotMgr = NULL);
 
 	void	release();
 
@@ -37,13 +43,13 @@ public:
 	const char* id() const{ return _id.c_str(); }
 
 public:
-	virtual void handleSymbolList(const WTSArray* aySymbols) override;
+	virtual void handleSymbolList(const WTSArray* aySymbols) override {}
 
 	virtual void handleQuote(WTSTickData *quote, bool bNeedSlice) override;
 
 	virtual void handleParserLog(WTSLogLevel ll, const char* format, ...) override;
 
-	virtual IBaseDataMgr* getBaseDataMgr();
+	virtual IBaseDataMgr* getBaseDataMgr() override { return _bd_mgr; }
 
 
 private:
@@ -54,8 +60,10 @@ private:
 
 	typedef std::unordered_set<std::string>	ExchgFilter;
 	ExchgFilter			_exchg_filter;
+	ExchgFilter			_code_filter;
 	IBaseDataMgr*		_bd_mgr;
-	WtEngine*			_engine;
+	IHotMgr*			_hot_mgr;
+	IParserStub*		_stub;
 	WTSVariant*			_cfg;
 	std::string			_id;
 };

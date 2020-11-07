@@ -9,16 +9,16 @@
  */
 #include "TraderFemas.h"
 
-#include "../Share/WTSError.hpp"
-#include "../Share/IBaseDataMgr.h"
-#include "../Share/WTSTradeDef.hpp"
-#include "../Share/WTSDataDef.hpp"
-#include "../Share/WTSParams.hpp"
-#include "../Share/WTSContractInfo.hpp"
+#include "../Includes/WTSError.hpp"
+#include "../Includes/IBaseDataMgr.h"
+#include "../Includes/WTSTradeDef.hpp"
+#include "../Includes/WTSDataDef.hpp"
+#include "../Includes/WTSParams.hpp"
+#include "../Includes/WTSContractInfo.hpp"
 #include "../Share/StdUtils.hpp"
 #include "../Share/TimeUtils.hpp"
 #include "../Share/BoostFile.hpp"
-
+#include "../Share/StrUtil.hpp"
 #include "../Share/decimal.h"
 
 #ifdef _WIN32
@@ -166,7 +166,11 @@ bool TraderFemas::init(WTSParams* params)
 
 	m_hInstCTP = DLLHelper::load_library(m_strModule.c_str());
 #ifdef _WIN32
+#	ifdef _WIN64
+	const char* creatorName = "?CreateFtdcTraderApi@CUstpFtdcTraderApi@@SAPEAV1@PEBD@Z";
+#	else
 	const char* creatorName = "?CreateFtdcTraderApi@CUstpFtdcTraderApi@@SAPAV1@PBD@Z";
+#	endif	
 #else
 	const char* creatorName = "_ZN18CUstpFtdcTraderApi19CreateFtdcTraderApiEPKc";
 #endif

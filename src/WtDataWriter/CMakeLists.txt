@@ -11,11 +11,11 @@ SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC")
 #3. 环境判断
 IF (WIN32)
 	IF("${CMAKE_GENERATOR}" MATCHES "(Win64|IA64)")
-		SET(INCS $ENV{MyX64Deps12}/include)
-		SET(LNKS $ENV{MyX64Deps12}/lib)
+		SET(INCS $ENV{MyDepends141}/include)
+		SET(LNKS $ENV{MyDepends141}/lib/x64)
 	ELSE()
-		SET(INCS $ENV{MyDepends12}/include)
-		SET(LNKS $ENV{MyDepends12}/lib)
+		SET(INCS $ENV{MyDepends141}/include)
+		SET(LNKS $ENV{MyDepends141}/lib/x86)
 	ENDIF()
 ELSE (UNIX)
 	SET (MyDeps "/home/mydeps")
@@ -36,14 +36,15 @@ ADD_LIBRARY(WtDataWriter SHARED ${SRCS} ${HDRS})
 SET(LIBS
 	${PROJECT_SOURCE_DIR}/../build/libs/libWTSUtils.a
 	
+	${MyDeps}/lib/libmysqlclient.a
 	dl
 	pthread
 	boost_filesystem	
 )
 
-TARGET_LINK_LIBRARIES(WtDataWriter ${LIBS})
 IF (WIN32)
 ELSE (UNIX)
+	TARGET_LINK_LIBRARIES(WtDataWriter ${LIBS})
 	SET_TARGET_PROPERTIES(WtDataWriter PROPERTIES
 		CXX_VISIBILITY_PRESET hidden
 		VISIBILITY_INLINES_HIDDEN 1)

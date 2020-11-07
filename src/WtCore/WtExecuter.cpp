@@ -9,16 +9,16 @@
  */
 #include "WtExecuter.h"
 #include "TraderAdapter.h"
-#include "WtDataManager.h"
+#include "../Includes/IDataManager.h"
 #include "WtEngine.h"
 
 #include "../Share/CodeHelper.hpp"
 #include "../Share/StrUtil.hpp"
 #include "../Share/StdUtils.hpp"
-#include "../Share/WTSVariant.hpp"
+#include "../Includes/WTSVariant.hpp"
 #include "../Share/BoostFile.hpp"
 #include "../Share/TimeUtils.hpp"
-#include "../Share/IHotMgr.h"
+#include "../Includes/IHotMgr.h"
 #include "../Share/decimal.h"
 
 #include "../WTSTools/WTSLogger.h"
@@ -26,12 +26,11 @@
 USING_NS_OTP;
 
 
-WtExecuter::WtExecuter(WtExecuterFactory* factory, const char* name, WtDataManager* dataMgr)
+WtExecuter::WtExecuter(WtExecuterFactory* factory, const char* name, IDataManager* dataMgr)
 	: _factory(factory)
 	, _name(name)
 	, _data_mgr(dataMgr)
 	, _channel_ready(false)
-	, _engine(NULL)
 {
 }
 
@@ -165,18 +164,24 @@ void WtExecuter::writeLog(const char* fmt, ...)
 	strcat(szBuf, fmt);
 	va_list args;
 	va_start(args, fmt);
-	WTSLogger::log_dyn_direct("executer", _name.c_str(), LL_INFO, szBuf, args);
+	WTSLogger::vlog_dyn("executer", _name.c_str(), LL_INFO, szBuf, args);
 	va_end(args);
 }
 
 WTSCommodityInfo* WtExecuter::getCommodityInfo(const char* stdCode)
 {
-	return _engine->get_commodity_info(stdCode);
+	return _stub->get_comm_info(stdCode);
+}
+
+WTSSessionInfo* WtExecuter::getSessionInfo(const char* stdCode)
+{
+	return _stub->get_sess_info(stdCode);
 }
 
 uint64_t WtExecuter::getCurTime()
 {
-	return TimeUtils::makeTime(_engine->get_date(), _engine->get_raw_time() * 100000 + _engine->get_secs());
+	return _stub->get_real_time();
+	//return TimeUtils::makeTime(_stub->get_date(), _stub->get_raw_time() * 100000 + _stub->get_secs());
 }
 
 #pragma endregion Context回调接口
@@ -197,10 +202,9 @@ void WtExecuter::on_position_changed(const char* stdCode, double targetPos)
 	//int32_t targetPos = oldVol + diffQty;
 	_target_pos[stdCode] = targetPos;
 
-	//writeLog("%s目标仓位更新: %f -> %f", stdCode, oldVol, targetPos);
 	if(!decimal::eq(oldVol, targetPos))
 	{
-		StreamLogger(LL_INFO, _name.c_str(), "executer").self() << "[" << _name << "]" << stdCode << "目标仓位更新: " << oldVol << " -> " << targetPos << "";
+		writeLog(fmt::format("{}目标仓位更新: {} -> {}", stdCode, oldVol, targetPos).c_str());
 	}
 
 	if (_trader && !_trader->checkOrderLimits(stdCode))
@@ -227,8 +231,7 @@ void WtExecuter::set_position(const std::unordered_map<std::string, double>& tar
 		_target_pos[stdCode] = newVol;
 		if(!decimal::eq(oldVol, newVol))
 		{
-			//writeLog("%s目标仓位更新: %f -> %f", stdCode, oldVol, newVol);
-			StreamLogger(LL_INFO, _name.c_str(), "executer").self() << "[" << _name << "]" << stdCode << "目标仓位更新: " << oldVol << " -> " << newVol << "";
+			writeLog(fmt::format("{}目标仓位更新: {} -> {}", stdCode, oldVol, newVol).c_str());
 		}
 
 		if (_trader && !_trader->checkOrderLimits(stdCode))
@@ -298,7 +301,7 @@ void WtExecuter::on_tick(const char* stdCode, WTSTickData* newTick)
 	}
 }
 
-void WtExecuter::on_trade(const char* stdCode, bool isBuy, double vol, double price)
+void WtExecuter::on_trade(uint32_t localid, const char* stdCode, bool isBuy, double vol, double price)
 {
 	ExecuteUnitPtr unit = getUnit(stdCode, false);
 	if (unit == NULL)
@@ -308,13 +311,13 @@ void WtExecuter::on_trade(const char* stdCode, bool isBuy, double vol, double pr
 	if (_pool)
 	{
 		std::string code = stdCode;
-		_pool->schedule([unit, code, isBuy, vol, price](){
-			unit->self()->on_trade(code.c_str(), isBuy, vol, price);
+		_pool->schedule([localid, unit, code, isBuy, vol, price](){
+			unit->self()->on_trade(localid, code.c_str(), isBuy, vol, price);
 		});
 	}
 	else
 	{
-		unit->self()->on_trade(stdCode, isBuy, vol, price);
+		unit->self()->on_trade(localid, stdCode, isBuy, vol, price);
 	}
 }
 
@@ -328,8 +331,8 @@ void WtExecuter::on_order(uint32_t localid, const char* stdCode, bool isBuy, dou
 	if (_pool)
 	{
 		std::string code = stdCode;
-		_pool->schedule([unit, code, isBuy, leftQty, price, isCanceled](){
-			unit->self()->on_trade(code.c_str(), isBuy, leftQty, price);
+		_pool->schedule([localid, unit, code, isBuy, leftQty, price, isCanceled](){
+			unit->self()->on_order(localid, code.c_str(), isBuy, leftQty, price, isCanceled);
 		});
 	}
 	else
@@ -407,12 +410,12 @@ void WtExecuter::on_channel_lost()
 
 void WtExecuter::on_position(const char* stdCode, bool isLong, double prevol, double preavail, double newvol, double newavail)
 {
-	IHotMgr* hotMgr = _engine->get_hot_mgr();
-	if(CodeHelper::isStdFutHotCode(stdCode))
+	IHotMgr* hotMgr = _stub->get_hot_mon();
+	if(CodeHelper::isStdFutCode(stdCode))
 	{
 		CodeHelper::CodeInfo cInfo;
 		CodeHelper::extractStdFutCode(stdCode, cInfo);
-		std::string code = hotMgr->getPrevRawCode(cInfo._exchg, cInfo._product, _engine->get_trading_date());
+		std::string code = hotMgr->getPrevRawCode(cInfo._exchg, cInfo._product, _stub->get_trading_day());
 		if (code == stdCode)
 		{
 			//上期主力合约，需要清理仓位
@@ -533,3 +536,33 @@ ExecuteUnitPtr WtExecuterFactory::createExeUnit(const char* name)
 	}
 	return ExecuteUnitPtr(new ExeUnitWrapper(unit, fInfo._fact));
 }
+
+//////////////////////////////////////////////////////////////////////////
+#pragma region "WtExecuterMgr"
+void WtExecuterMgr::set_positions(std::unordered_map<std::string, double> target_pos)
+{
+	for (auto it = _executers.begin(); it != _executers.end(); it++)
+	{
+		ExecCmdPtr& executer = (*it);
+		executer->set_position(target_pos);
+	}
+}
+
+void WtExecuterMgr::handle_pos_change(const char* stdCode, double targetPos)
+{
+	for (auto it = _executers.begin(); it != _executers.end(); it++)
+	{
+		ExecCmdPtr& executer = (*it);
+		executer->on_position_changed(stdCode, targetPos);
+	}
+}
+
+void WtExecuterMgr::handle_tick(const char* stdCode, WTSTickData* curTick)
+{
+	for (auto it = _executers.begin(); it != _executers.end(); it++)
+	{
+		ExecCmdPtr& executer = (*it);
+		executer->on_tick(stdCode, curTick);
+	}
+}
+#pragma endregion "WtExecuterMgr"

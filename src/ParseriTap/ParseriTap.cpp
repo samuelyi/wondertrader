@@ -3,20 +3,15 @@
 
 #include "../Share/StrUtil.hpp"
 #include "../Share/TimeUtils.hpp"
-#include "../Share/WTSDataDef.hpp"
+#include "../Includes/WTSDataDef.hpp"
 #include "../Share/BoostDefine.h"
-#include "../Share/IBaseDataMgr.h"
-#include "../Share/WTSParams.hpp"
-#include "../Share/WTSContractInfo.hpp"
+#include "../Includes/IBaseDataMgr.h"
+#include "../Includes/WTSParams.hpp"
+#include "../Includes/WTSContractInfo.hpp"
 #include "../Share/DLLHelper.hpp"
 
 
 #ifdef _WIN32
-#ifdef _WIN64
-#pragma comment(lib, "./TapQuote/TapQuoteAPI64.lib")
-#else
-#pragma comment(lib, "./TapQuote/TapQuoteAPI32.lib")
-#endif
 #include <wtypes.h>
 HMODULE	g_dllModule = NULL;
 
@@ -151,7 +146,11 @@ bool ParseriTap::init(WTSParams* config)
 #endif
 	}
 
-	DLLHelper::load_library(m_strModule.c_str());
+	m_hInst = DLLHelper::load_library(m_strModule.c_str());
+	const char* creatorName = "CreateTapQuoteAPI";
+	const char* removerName = "FreeTapQuoteAPI";
+	m_funcCreator = (iTapCreator)DLLHelper::get_symbol(m_hInst, creatorName);
+	m_funcRemover = (iTapRemover)DLLHelper::get_symbol(m_hInst, removerName);
 
 	return true;
 }
@@ -408,7 +407,7 @@ bool ParseriTap::login(bool bNeedReconn /* = false */)
 	if(m_pUserAPI != NULL)
 	{
 		m_pUserAPI->SetAPINotify(NULL);
-		FreeTapQuoteAPI(m_pUserAPI);
+		m_funcRemover(m_pUserAPI);
 		m_pUserAPI = NULL;
 	}
 
@@ -417,7 +416,7 @@ bool ParseriTap::login(bool bNeedReconn /* = false */)
 	strcpy(stAppInfo.AuthCode, m_strAuthCode.c_str());
 	strcpy(stAppInfo.KeyOperationLogPath, "");
 
-	m_pUserAPI = CreateTapQuoteAPI(&stAppInfo, iResult);
+	m_pUserAPI = m_funcCreator(&stAppInfo, iResult);
 	if(m_pUserAPI == NULL)
 		return false;
 

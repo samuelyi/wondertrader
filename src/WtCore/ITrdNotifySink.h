@@ -9,7 +9,7 @@
  */
 #pragma once
 #include <stdint.h>
-#include "../Share/WTSMarcos.h"
+#include "../Includes/WTSMarcos.h"
 
 NS_OTP_BEGIN
 
@@ -19,7 +19,7 @@ public:
 	/*
 	 *	成交回报
 	 */
-	virtual void on_trade(const char* stdCode, bool isBuy, double vol, double price) = 0;
+	virtual void on_trade(uint32_t localid, const char* stdCode, bool isBuy, double vol, double price) = 0;
 
 	/*
 	 *	订单回报
@@ -29,7 +29,7 @@ public:
 	/*
 	 *	持仓更新回调
 	 */
-	virtual void on_position(const char* stdCode, bool isLong, double prevol, double preavail, double newvol, double newavail) = 0;
+	virtual void on_position(const char* stdCode, bool isLong, double prevol, double preavail, double newvol, double newavail) {}
 
 	/*
 	 *	交易通道就绪

@@ -10,9 +10,9 @@
 #include "WtDtRunner.h"
 #include "../WtDtCore/WtHelper.h"
 
-#include "../Share/WTSSessionInfo.hpp"
+#include "../Includes/WTSSessionInfo.hpp"
 #include "../Share/DLLHelper.hpp"
-#include "../Share/WTSVariant.hpp"
+#include "../Includes/WTSVariant.hpp"
 #include "../Share/JsonToVariant.hpp"
 
 #include "../WTSTools/WTSLogger.h"
@@ -111,6 +111,7 @@ void WtDtRunner::initParsers(WTSVariant* cfg)
 		if (!StdFile::exists(module.c_str()))
 		{
 			module = WtHelper::get_module_dir();
+			module += "parsers/";
 			module += cfgItem->getCString("module");
 		}
 		DllHandle libParser = DLLHelper::load_library(module.c_str());

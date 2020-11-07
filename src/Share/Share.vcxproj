@@ -21,34 +21,34 @@
   <PropertyGroup Label="Globals">
     <ProjectGuid>{684B21F9-D62C-435D-B9EC-BE5F0FD6A603}</ProjectGuid>
     <RootNamespace>Share</RootNamespace>
-    <WindowsTargetPlatformVersion>8.1</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0.17763.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
     <CharacterSet>MultiByte</CharacterSet>
-    <PlatformToolset>v120_xp</PlatformToolset>
+    <PlatformToolset>v141</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
     <CharacterSet>MultiByte</CharacterSet>
-    <PlatformToolset>v120_xp</PlatformToolset>
+    <PlatformToolset>v141</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>MultiByte</CharacterSet>
-    <PlatformToolset>v120</PlatformToolset>
+    <PlatformToolset>v141</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>MultiByte</CharacterSet>
-    <PlatformToolset>v120</PlatformToolset>
+    <PlatformToolset>v141</PlatformToolset>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
@@ -115,6 +115,31 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="..\Includes\IBaseDataMgr.h" />
+    <ClInclude Include="..\Includes\IDataFactory.h" />
+    <ClInclude Include="..\Includes\IDataManager.h" />
+    <ClInclude Include="..\Includes\IDataReader.h" />
+    <ClInclude Include="..\Includes\IDataWriter.h" />
+    <ClInclude Include="..\Includes\IExpFactory.h" />
+    <ClInclude Include="..\Includes\IHotMgr.h" />
+    <ClInclude Include="..\Includes\IParserApi.h" />
+    <ClInclude Include="..\Includes\ISessionMgr.h" />
+    <ClInclude Include="..\Includes\ITraderApi.h" />
+    <ClInclude Include="..\Includes\WTSCollection.hpp" />
+    <ClInclude Include="..\Includes\WTSContractInfo.hpp" />
+    <ClInclude Include="..\Includes\WTSDataDef.hpp" />
+    <ClInclude Include="..\Includes\WTSError.hpp" />
+    <ClInclude Include="..\Includes\WTSExpressData.hpp" />
+    <ClInclude Include="..\Includes\WTSHotItem.hpp" />
+    <ClInclude Include="..\Includes\WTSMarcos.h" />
+    <ClInclude Include="..\Includes\WTSObject.hpp" />
+    <ClInclude Include="..\Includes\WTSParams.hpp" />
+    <ClInclude Include="..\Includes\WTSRiskDef.hpp" />
+    <ClInclude Include="..\Includes\WTSSessionInfo.hpp" />
+    <ClInclude Include="..\Includes\WTSStruct.h" />
+    <ClInclude Include="..\Includes\WTSTradeDef.hpp" />
+    <ClInclude Include="..\Includes\WTSTypes.h" />
+    <ClInclude Include="..\Includes\WTSVariant.hpp" />
     <ClInclude Include="BoostDefine.h" />
     <ClInclude Include="BoostFile.hpp" />
     <ClInclude Include="BoostMappingFile.hpp" />
@@ -122,20 +147,10 @@
     <ClInclude Include="CodeHelper.hpp" />
     <ClInclude Include="decimal.h" />
     <ClInclude Include="DLLHelper.hpp" />
-    <ClInclude Include="IBaseDataMgr.h" />
-    <ClInclude Include="IDataFactory.h" />
-    <ClInclude Include="IDataWriter.h" />
-    <ClInclude Include="IExpFactory.h" />
-    <ClInclude Include="IHotMgr.h" />
     <ClInclude Include="ILogHandler.h" />
     <ClInclude Include="IniFile.hpp" />
     <ClInclude Include="IniHelper.hpp" />
-    <ClInclude Include="IParserApi.h" />
-    <ClInclude Include="ISessionMgr.h" />
-    <ClInclude Include="ITraderApi.h" />
     <ClInclude Include="JsonToVariant.hpp" />
-    <ClInclude Include="PacketDefine.h" />
-    <ClInclude Include="PriceHelper.hpp" />
     <ClInclude Include="StdUtils.hpp" />
     <ClInclude Include="threadpool.hpp" />
     <ClInclude Include="threadpool\detail\future.hpp" />
@@ -150,23 +165,8 @@
     <ClInclude Include="threadpool\shutdown_policies.hpp" />
     <ClInclude Include="threadpool\size_policies.hpp" />
     <ClInclude Include="threadpool\task_adaptors.hpp" />
-    <ClInclude Include="WTSHotItem.hpp" />
-    <ClInclude Include="WTSRiskDef.hpp" />
-    <ClInclude Include="WTSSessionInfo.hpp" />
-    <ClInclude Include="WTSStruct.h" />
     <ClInclude Include="StrUtil.hpp" />
     <ClInclude Include="TimeUtils.hpp" />
-    <ClInclude Include="WTSCollection.hpp" />
-    <ClInclude Include="WTSParams.hpp" />
-    <ClInclude Include="WTSContractInfo.hpp" />
-    <ClInclude Include="WTSError.hpp" />
-    <ClInclude Include="WTSExpressData.hpp" />
-    <ClInclude Include="WTSMarcos.h" />
-    <ClInclude Include="WTSObject.hpp" />
-    <ClInclude Include="WTSTradeDef.hpp" />
-    <ClInclude Include="WTSDataDef.hpp" />
-    <ClInclude Include="WTSTypes.h" />
-    <ClInclude Include="WTSVariant.hpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

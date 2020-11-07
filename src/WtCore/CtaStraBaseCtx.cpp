@@ -14,18 +14,17 @@
 #include <exception>
 #include <rapidjson/document.h>
 #include <rapidjson/prettywriter.h>
+namespace rj = rapidjson;
 
 #include "../Share/StrUtil.hpp"
 #include "../Share/StdUtils.hpp"
-#include "../Share/WTSContractInfo.hpp"
-#include "../Share/WTSSessionInfo.hpp"
-#include "../Share/WTSTradeDef.hpp"
+#include "../Includes/WTSContractInfo.hpp"
+#include "../Includes/WTSSessionInfo.hpp"
+#include "../Includes/WTSTradeDef.hpp"
 #include "../Share/decimal.h"
 #include "../Share/CodeHelper.hpp"
 
 #include "../WTSTools/WTSLogger.h"
-
-namespace rj = rapidjson;
 
 const char* CMP_ALG_NAMES[] =
 {
@@ -46,7 +45,7 @@ const char* ACTION_NAMES[] =
 };
 
 
-inline uint32_t makeCtxId()
+inline uint32_t makeCtaCtxId()
 {
 	static std::atomic<uint32_t> _auto_context_id{ 1 };
 	return _auto_context_id.fetch_add(1);
@@ -62,7 +61,7 @@ CtaStraBaseCtx::CtaStraBaseCtx(WtCtaEngine* engine, const char* name)
 	, _is_in_schedule(false)
 	, _ud_modified(false)
 {
-	_context_id = makeCtxId();
+	_context_id = makeCtaCtxId();
 }
 
 
@@ -169,7 +168,7 @@ void CtaStraBaseCtx::log_close(const char* stdCode, bool isLong, uint64_t openTi
 		ss << stdCode << "," << (isLong ? "LONG" : "SHORT") << "," << openTime << "," << openpx
 			<< "," << closeTime << "," << closepx << "," << qty << "," << profit << "," 
 			<< totalprofit << "," << enterTag << "," << exitTag << "\n";
-		_trade_logs->write_file(ss.str());
+		_close_logs->write_file(ss.str());
 
 		//_close_logs->write_file(StrUtil::printf("%s,%s,%s,%f,%s,%f,%f,%.2f,%.2f,%s,%s\n",
 		//	stdCode, isLong ? "LONG" : "SHORT", StrUtil::fmtUInt64(openTime).c_str(), openpx, StrUtil::fmtUInt64(closeTime).c_str(), closepx, qty, profit, totalprofit, enterTag, exitTag));
@@ -363,16 +362,13 @@ void CtaStraBaseCtx::load_data(uint32_t flag /* = 0xFFFFFFFF */)
 
 					condList.push_back(condInfo);
 
-					//stra_log_text("条件单恢复, 合约: %s, %s %d手, 触发条件: 最新价 %s %s", stdCode, ACTION_NAMES[condInfo._action], condInfo._qty, CMP_ALG_NAMES[condInfo._alg], condInfo._target);
-					{
-						StreamLogger(LL_INFO, _name.c_str(), "strategy").self() << "[" << _name << "]条件单恢复, 合约: " << stdCode << ", " << ACTION_NAMES[condInfo._action] 
-							<< " " << condInfo._qty << "手, 触发条件 : 最新价 " << CMP_ALG_NAMES[condInfo._alg] << " " << condInfo._target;
-					}
+					stra_log_text(fmt::format("条件单恢复, 合约: {}, {} {}, 触发条件: 最新价 {} {}",
+						stdCode, ACTION_NAMES[condInfo._action], condInfo._qty, CMP_ALG_NAMES[condInfo._alg], condInfo._target).c_str());
 					count++;
 				}
 			}
 
-			stra_log_text("条件单共恢复 %u 条, 设置时间为 %s", count, StrUtil::fmtUInt64(_last_cond_min).c_str());
+			stra_log_text(fmt::format("条件单共恢复 {} 条, 设置时间为 {}", count, _last_cond_min).c_str());
 		}
 	}
 
@@ -399,7 +395,7 @@ void CtaStraBaseCtx::load_data(uint32_t flag /* = 0xFFFFFFFF */)
 				sInfo._sigprice = jItem["sigprice"].GetDouble();
 				sInfo._gentime = jItem["gentime"].GetUint64();
 				
-				stra_log_text("未触发信号恢复, 合约: %s, 目标部位: %d手", stdCode, sInfo._volumn);
+				stra_log_text("未触发信号恢复, 合约: %s, 目标部位: %d", stdCode, sInfo._volumn);
 			}
 		}
 	}
@@ -635,20 +631,8 @@ void CtaStraBaseCtx::on_tick(const char* stdCode, WTSTickData* newTick, bool bEm
 
 			if (isMatched)
 			{
-				//stra_log_text("条件单触发[最新价: %f%s%f], 合约: %s, %s %f手", curVal, CMP_ALG_NAMES[entrust._alg], entrust._target, stdCode, ACTION_NAMES[entrust._action], entrust._qty);
-				{
+				stra_log_text(fmt::format("条件单触发[最新价: {}{}{}], 合约: {}, {} {}", curVal, CMP_ALG_NAMES[entrust._alg], entrust._target, stdCode, ACTION_NAMES[entrust._action], entrust._qty).c_str());
 
-					//char szBuf[256] = { 0 };
-					//uint32_t length = sprintf(szBuf, "[%s]", _name.c_str());
-					//strcat(szBuf, fmt);
-					//va_list args;
-					//va_start(args, fmt);
-					//WTSLogger::log_dyn_direct("strategy", _name.c_str(), LL_INFO, szBuf, args);
-					//va_end(args);
-
-					StreamLogger(LL_INFO, _name.c_str(), "strategy").self() << "[" << _name << "]条件单触发[最新价: " << curVal << CMP_ALG_NAMES[entrust._alg] 
-						<< entrust._target << "], 合约: " << stdCode << ", " << ACTION_NAMES[entrust._action] << " " << entrust._qty  << "手";
-				}
 				switch (entrust._action)
 				{
 				case COND_ACTION_OL:
@@ -767,8 +751,10 @@ bool CtaStraBaseCtx::on_schedule(uint32_t curDate, uint32_t curTime)
 				_total_calc_time += ticker.micro_seconds();
 
 				if (_emit_times % 20 == 0)
-					stra_log_text("策略共触发%u次, 共耗时%s微秒, 平均耗时%s微秒", 
-					_emit_times, StrUtil::fmtUInt64(_total_calc_time).c_str(), StrUtil::fmtUInt64(_total_calc_time / _emit_times).c_str());
+				{
+					stra_log_text(fmt::format("策略共触发{}次, 共耗时{}微秒, 平均耗时{}微秒",
+						_emit_times, _total_calc_time, _total_calc_time / _emit_times).c_str());
+				}
 
 				if (_ud_modified)
 				{
@@ -1092,7 +1078,7 @@ void CtaStraBaseCtx::do_set_position(const char* stdCode, double qty, const char
 
 	WTSCommodityInfo* commInfo = _engine->get_commodity_info(stdCode);
 
-	if (decimal::gt(pInfo._volumn*diff, 0))//当前持仓和目标仓位方向一致, 增加一条明细, 增加手数即可
+	if (decimal::gt(pInfo._volumn*diff, 0))//当前持仓和目标仓位方向一致, 增加一条明细, 增加数量即可
 	{
 		pInfo._volumn = qty;
 
@@ -1241,7 +1227,11 @@ WTSKlineSlice* CtaStraBaseCtx::stra_get_bars(const char* stdCode, const char* pe
 
 WTSTickSlice* CtaStraBaseCtx::stra_get_ticks(const char* stdCode, uint32_t count)
 {
-	return _engine->get_tick_slice(_context_id, stdCode, count);
+	WTSTickSlice* ret = _engine->get_tick_slice(_context_id, stdCode, count);
+	if (ret)
+		_engine->sub_tick(id(), stdCode);
+
+	return ret;
 }
 
 WTSTickData* CtaStraBaseCtx::stra_get_last_tick(const char* stdCode)
@@ -1249,9 +1239,10 @@ WTSTickData* CtaStraBaseCtx::stra_get_last_tick(const char* stdCode)
 	return _engine->get_last_tick(_context_id, stdCode);
 }
 
-void CtaStraBaseCtx::sub_ticks(const char* code)
+void CtaStraBaseCtx::stra_sub_ticks(const char* code)
 {
 	_engine->sub_tick(_context_id, code);
+	stra_log_text("实时行情已订阅: %s", code);
 }
 
 WTSCommodityInfo* CtaStraBaseCtx::stra_get_comminfo(const char* stdCode)
@@ -1276,7 +1267,7 @@ void CtaStraBaseCtx::stra_log_text(const char* fmt, ...)
 	strcat(szBuf, fmt);
 	va_list args;
 	va_start(args, fmt);
-	WTSLogger::log_dyn_direct("strategy", _name.c_str(), LL_INFO, szBuf, args);
+	WTSLogger::vlog_dyn("strategy", _name.c_str(), LL_INFO, szBuf, args);
 	va_end(args);
 }
 

@@ -8,7 +8,8 @@
  * \brief 
  */
 #pragma once
-#include "../Share/IParserApi.h"
+#include "../Includes/IParserApi.h"
+#include "../Share/DLLHelper.hpp"
 #include "./ThostTraderApi/ThostFtdcMdApi.h"
 #include <map>
 
@@ -102,5 +103,9 @@ private:
 
 	IParserApiListener*	m_parserSink;
 	IBaseDataMgr*		m_pBaseDataMgr;
+
+	DllHandle		m_hInstCTP;
+	typedef CThostFtdcMdApi* (*CTPCreator)(const char *, const bool, const bool);
+	CTPCreator		m_funcCreator;
 };
 

@@ -23,34 +23,34 @@
     <Keyword>Win32Proj</Keyword>
     <RootNamespace>WTSTools</RootNamespace>
     <ProjectName>WTSToolsLib</ProjectName>
-    <WindowsTargetPlatformVersion>8.1</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0.17763.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
     <CharacterSet>MultiByte</CharacterSet>
-    <PlatformToolset>v120</PlatformToolset>
+    <PlatformToolset>v141</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
     <CharacterSet>MultiByte</CharacterSet>
-    <PlatformToolset>v120</PlatformToolset>
+    <PlatformToolset>v141</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>MultiByte</CharacterSet>
-    <PlatformToolset>v120</PlatformToolset>
+    <PlatformToolset>v141</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>MultiByte</CharacterSet>
-    <PlatformToolset>v120</PlatformToolset>
+    <PlatformToolset>v141</PlatformToolset>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
@@ -69,30 +69,32 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
-    <IncludePath>$(MyDepends12)\include;$(IncludePath)</IncludePath>
-    <LibraryPath>$(MyDepends12)\lib;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(MyDepends141)\include;$(IncludePath)</IncludePath>
+    <LibraryPath>$(MyDepends141)\lib\x86;$(LibraryPath)</LibraryPath>
     <LinkIncremental>true</LinkIncremental>
     <OutDir>$(SolutionDir)$(Platform)\libs\$(Configuration)\</OutDir>
     <IntDir>$(Platform)\$(Configuration)\</IntDir>
+    <ReferencePath>D:\Windows Kits\10\Include\10.0.18362.0\ucrt;$(ReferencePath)</ReferencePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <IncludePath>$(MyDepends12X64)\include;$(IncludePath)</IncludePath>
-    <LibraryPath>$(MyDepends12X64)\lib;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(MyDepends141)\include;$(IncludePath)</IncludePath>
+    <LibraryPath>$(MyDepends141)\lib\x64;$(LibraryPath)</LibraryPath>
     <LinkIncremental>true</LinkIncremental>
     <OutDir>$(SolutionDir)$(Platform)\libs\$(Configuration)\</OutDir>
+    <ReferencePath>D:\Windows Kits\10\Include\10.0.18362.0\ucrt;$(ReferencePath)</ReferencePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
-    <IncludePath>$(MyDepends12)\include;$(IncludePath)</IncludePath>
+    <IncludePath>$(MyDepends141)\include;$(IncludePath)</IncludePath>
     <SourcePath>$(SourcePath)</SourcePath>
-    <LibraryPath>$(MyDepends12)\lib;$(LibraryPath)</LibraryPath>
+    <LibraryPath>$(MyDepends141)\lib\x86;$(LibraryPath)</LibraryPath>
     <LinkIncremental>false</LinkIncremental>
     <OutDir>$(SolutionDir)$(Platform)\libs\$(Configuration)\</OutDir>
     <IntDir>$(Platform)\$(Configuration)\</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <IncludePath>$(MyDepends12)\include;$(IncludePath)</IncludePath>
+    <IncludePath>$(MyDepends141)\include;$(IncludePath)</IncludePath>
     <SourcePath>$(SourcePath)</SourcePath>
-    <LibraryPath>$(MyDepends12)\lib;$(LibraryPath)</LibraryPath>
+    <LibraryPath>$(MyDepends141)\lib\x86;$(LibraryPath)</LibraryPath>
     <LinkIncremental>false</LinkIncremental>
     <OutDir>$(SolutionDir)$(Platform)\libs\$(Configuration)\</OutDir>
   </PropertyGroup>
@@ -177,7 +179,6 @@
     <ClInclude Include="WTSExpFactory.h" />
     <ClInclude Include="WTSHotMgr.h" />
     <ClInclude Include="WTSLogger.h" />
-    <ClInclude Include="WTSParamParser.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="WTSBaseDataMgr.cpp" />
@@ -185,7 +186,6 @@
     <ClCompile Include="WTSExpFactory.cpp" />
     <ClCompile Include="WTSHotMgr.cpp" />
     <ClCompile Include="WTSLogger.cpp" />
-    <ClCompile Include="WTSParamParser.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\WTSUtils\WTSUtils.vcxproj">

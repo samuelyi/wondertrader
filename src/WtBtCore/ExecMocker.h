@@ -11,7 +11,7 @@
 #include <fstream>
 #include "HisDataReplayer.h"
 
-#include "../WtCore/ExecuteDefs.h"
+#include "../Includes/ExecuteDefs.h"
 #include "../Share/StdUtils.hpp"
 #include "../Share/DLLHelper.hpp"
 
@@ -64,6 +64,7 @@ public:
 	virtual void writeLog(const char* fmt, ...) override;
 
 	virtual WTSCommodityInfo* getCommodityInfo(const char* stdCode) override;
+	virtual WTSSessionInfo* getSessionInfo(const char* stdCode) override;
 
 	virtual uint64_t getCurTime() override;
 

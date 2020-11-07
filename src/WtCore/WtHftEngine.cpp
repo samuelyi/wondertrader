@@ -12,10 +12,17 @@
 #include "WtHftEngine.h"
 #include "WtHftTicker.h"
 #include "WtDataManager.h"
+#include "TraderAdapter.h"
+#include "WtHelper.h"
 
 #include "../Share/CodeHelper.hpp"
 #include "../Share/StrUtil.hpp"
-#include "../Share/WTSVariant.hpp"
+#include "../Share/StdUtils.hpp"
+#include "../Includes/WTSVariant.hpp"
+
+#include <rapidjson/document.h>
+#include <rapidjson/prettywriter.h>
+namespace rj = rapidjson;
 
 #include <boost/asio.hpp>
 
@@ -62,6 +69,40 @@ void WtHftEngine::run(bool bAsync /*= false*/)
 	_tm_ticker = new WtHftRtTicker(this);
 	WTSVariant* cfgProd = _cfg->get("product");
 	_tm_ticker->init(_data_mgr->reader(), cfgProd->getCString("session"));
+
+	//启动之前，先把运行中的策略落地
+	{
+		rj::Document root(rj::kObjectType);
+		rj::Document::AllocatorType &allocator = root.GetAllocator();
+
+		rj::Value jStraList(rj::kArrayType);
+		for (auto& m : _ctx_map)
+		{
+			const HftContextPtr& ctx = m.second;
+			jStraList.PushBack(rj::Value(ctx->name(), allocator), allocator);
+		}
+
+		root.AddMember("marks", jStraList, allocator);
+
+		rj::Value jChnlList(rj::kArrayType);
+		for (auto& m : _adapter_mgr->getAdapters())
+		{
+			const TraderAdapterPtr& adapter = m.second;
+			jChnlList.PushBack(rj::Value(adapter->id(), allocator), allocator);
+		}
+
+		root.AddMember("channels", jChnlList, allocator);
+
+		root.AddMember("engine", rj::Value("HFT", allocator), allocator);
+
+		std::string filename = WtHelper::getBaseDir();
+		filename += "marker.json";
+
+		rj::StringBuffer sb;
+		rj::PrettyWriter<rj::StringBuffer> writer(sb);
+		root.Accept(writer);
+		StdFile::write_file_content(filename.c_str(), sb.GetString());
+	}
 
 	_tm_ticker->run();
 
@@ -131,11 +172,12 @@ void WtHftEngine::on_bar(const char* stdCode, const char* period, uint32_t times
 
 void WtHftEngine::on_minute_end(uint32_t curDate, uint32_t curTime)
 {
-	for(auto& cit : _ctx_map)
-	{
-		HftContextPtr& ctx = cit.second;
-		ctx->on_schedule(curDate, curTime);
-	}
+	//已去掉高频策略的on_schedule
+	//for(auto& cit : _ctx_map)
+	//{
+	//	HftContextPtr& ctx = cit.second;
+	//	ctx->on_schedule(curDate, curTime);
+	//}
 }
 
 void WtHftEngine::addContext(HftContextPtr ctx)
